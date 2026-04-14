@@ -25,10 +25,11 @@ const ACCUMULATE_FIELDS = new Set<MappableField>([
   "specialists",
 ]);
 
-// Colunas a ignorar (metadados do formulário)
+// Colunas a ignorar silenciosamente (metadados do formulário)
 const IGNORE_KEYWORDS = [
-  "timezone", "submission_date", "source", "fbEventId", "medium",
-  "mediumid", "documenturl", "url", "submission", "source",
+  "timezone", "submission_date", "submission", "source",
+  "fbEventId", "fbeventid", "medium", "mediumid",
+  "documenturl", "url",
 ];
 
 // Detecção por palavras-chave na coluna normalizada
@@ -39,6 +40,9 @@ function detectField(key: string): MappableField | null {
 
   // Nome do responsável (contato)
   if (key === "nome_completo" || key.startsWith("nome_completo")) return "name";
+
+  // Email
+  if (key === "email") return "email";
 
   // Nome da clínica
   if (key === "nome_clinica" || key === "nome_da_clinica" || key === "clinica") return "clinicName";
@@ -53,6 +57,12 @@ function detectField(key: string): MappableField | null {
 
   // Cidade
   if (key === "cidade" || key === "city") return "city";
+
+  // Estado
+  if (key === "estado" || key === "state" || key === "uf") return "state";
+
+  // CEP
+  if (key === "cep" || key === "zipcode" || key === "zip_code" || key === "codigo_postal") return "zipCode";
 
   // Bairro
   if (key === "bairro" || key === "neighborhood") return "neighborhood";
@@ -89,8 +99,14 @@ function detectField(key: string): MappableField | null {
   if (key.includes("diferencial") && !key.includes("profissional")) return "differentials";
   if (key.includes("conforto") || key.includes("experiencia")) return "differentials";
 
-  // Tom / informalidade (apenas coluna específica de informalidade — NÃO "Tratamento: você/tu")
+  // Tom / informalidade
   if (key.includes("informalidade") || key.includes("nivel_de_informal") || key.includes("tom_desejado") || key === "tom" || key === "tone") return "tone";
+
+  // Uso de emojis
+  if (key.includes("emoji") || key.includes("uso_de_emoji")) return "emojiUsage";
+
+  // Pronome de tratamento (você/tu)
+  if (key === "tratamento" || key.includes("pronome") || key.includes("voce_ou_tu")) return "treatmentPronoun";
 
   // Público-alvo
   if (key.includes("publico_alvo") || key.includes("publico_alv") || key === "publico") return "targetAudience";

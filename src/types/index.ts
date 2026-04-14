@@ -30,11 +30,14 @@ export type {
 
 // Dados parseados de um CSV de onboarding
 export interface ParsedOnboardingData {
-  name?: string;          // nome do responsável / contato
+  name?: string;
+  email?: string;
   clinicName?: string;
   assistantName?: string;
   attendantName?: string;
   city?: string;
+  state?: string;
+  zipCode?: string;
   neighborhood?: string;
   address?: string;
   reference?: string;
@@ -53,6 +56,8 @@ export interface ParsedOnboardingData {
   mandatoryPhrases?: string;
   schedulingMode?: string;
   schedulingSystem?: string;
+  emojiUsage?: string;
+  treatmentPronoun?: string;
   // campos não mapeados ficam aqui
   unmapped: Record<string, string>;
 }

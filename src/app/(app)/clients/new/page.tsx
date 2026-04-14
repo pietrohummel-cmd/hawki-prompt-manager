@@ -12,7 +12,10 @@ const schema = z.object({
   name: z.string().min(1, "Obrigatório"),
   clinicName: z.string().min(1, "Obrigatório"),
   assistantName: z.string().optional(),
+  email: z.string().optional(),
   city: z.string().optional(),
+  state: z.string().optional(),
+  zipCode: z.string().optional(),
   neighborhood: z.string().optional(),
   address: z.string().optional(),
   reference: z.string().optional(),
@@ -32,6 +35,8 @@ const schema = z.object({
   technologies: z.string().optional(),
   differentials: z.string().optional(),
   businessHours: z.string().optional(),
+  emojiUsage: z.string().optional(),
+  treatmentPronoun: z.string().optional(),
 });
 
 type FormData = z.infer<typeof schema>;
@@ -87,10 +92,14 @@ function mapParsedToForm(parsed: ParsedOnboardingData): Partial<FormData> {
   const normSystem = parsed.schedulingSystem?.toLowerCase().trim() ?? "";
 
   return {
+    name: parsed.name,
+    email: parsed.email,
     clinicName: parsed.clinicName,
     assistantName: parsed.assistantName,
     attendantName: parsed.attendantName,
     city: parsed.city,
+    state: parsed.state,
+    zipCode: parsed.zipCode,
     neighborhood: parsed.neighborhood,
     address: parsed.address,
     reference: parsed.reference,
@@ -104,6 +113,8 @@ function mapParsedToForm(parsed: ParsedOnboardingData): Partial<FormData> {
     targetAudience: parsed.targetAudience,
     ageRange: parsed.ageRange,
     paymentInfo: parsed.paymentInfo,
+    emojiUsage: parsed.emojiUsage,
+    treatmentPronoun: parsed.treatmentPronoun,
     restrictions: parsed.restrictions,
     mandatoryPhrases: parsed.mandatoryPhrases,
     tone: Object.entries(toneMap).find(([k]) => normTone.includes(k))?.[1],
@@ -244,6 +255,9 @@ export default function NewClientPage() {
             <Field label="Nome da clínica *" error={errors.clinicName?.message}>
               <input {...register("clinicName")} placeholder="Clínica Sorrir" className={input()} />
             </Field>
+            <Field label="Email do responsável">
+              <input {...register("email")} type="email" placeholder="contato@clinica.com.br" className={input()} />
+            </Field>
             <Field label="Nome da assistente" error={errors.assistantName?.message}>
               <input {...register("assistantName")} placeholder="Sofia" className={input()} />
             </Field>
@@ -261,6 +275,12 @@ export default function NewClientPage() {
             <Field label="Faixa etária">
               <input {...register("ageRange")} placeholder="Ex: 40+" className={input()} />
             </Field>
+            <Field label="Pronome de tratamento">
+              <input {...register("treatmentPronoun")} placeholder="Você / Tu" className={input()} />
+            </Field>
+            <Field label="Uso de emojis" className="col-span-2">
+              <input {...register("emojiUsage")} placeholder="Ex: Moderado, 1-2 por mensagem" className={input()} />
+            </Field>
           </div>
         </Section>
 
@@ -269,6 +289,12 @@ export default function NewClientPage() {
           <div className="grid grid-cols-2 gap-4">
             <Field label="Cidade">
               <input {...register("city")} placeholder="São Paulo" className={input()} />
+            </Field>
+            <Field label="Estado">
+              <input {...register("state")} placeholder="PR" className={input()} />
+            </Field>
+            <Field label="CEP">
+              <input {...register("zipCode")} placeholder="86125-000" className={input()} />
             </Field>
             <Field label="Bairro">
               <input {...register("neighborhood")} placeholder="Vila Madalena" className={input()} />

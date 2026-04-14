@@ -7,7 +7,10 @@ const createClientSchema = z.object({
   name: z.string().min(1, "Nome do responsável é obrigatório"),
   clinicName: z.string().min(1, "Nome da clínica é obrigatório"),
   assistantName: z.string().default("Sofia"),
+  email: z.string().optional(),
   city: z.string().optional(),
+  state: z.string().optional(),
+  zipCode: z.string().optional(),
   neighborhood: z.string().optional(),
   address: z.string().optional(),
   reference: z.string().optional(),
@@ -29,6 +32,8 @@ const createClientSchema = z.object({
   technologies: z.string().optional(),
   differentials: z.string().optional(),
   businessHours: z.string().optional(),
+  emojiUsage: z.string().optional(),
+  treatmentPronoun: z.string().optional(),
 });
 
 export async function POST(request: Request) {

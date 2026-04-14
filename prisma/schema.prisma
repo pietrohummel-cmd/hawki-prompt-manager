@@ -88,7 +88,10 @@ model Client {
   name              String           // nome do contato / responsável
   clinicName        String           // nome da clínica (como aparece nas mensagens)
   assistantName     String           @default("Sofia")
+  email             String?          // email do responsável
   city              String?
+  state             String?          // estado (ex: SP, PR)
+  zipCode           String?          // CEP
   neighborhood      String?
   address           String?
   reference         String?          // ponto de referência
@@ -96,6 +99,8 @@ model Client {
   instagram         String?
   website           String?
   attendantName     String?          // responsável humano no handoff
+  emojiUsage        String?          // regra de uso de emojis (ex: moderado, 1-2 por mensagem)
+  treatmentPronoun  String?          // pronome de tratamento (Você / Tu)
   schedulingSystem  SchedulingSystem?
   schedulingMode    SchedulingMode?
   tone              ClientTone?
