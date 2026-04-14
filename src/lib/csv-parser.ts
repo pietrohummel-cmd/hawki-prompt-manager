@@ -77,21 +77,20 @@ function detectField(key: string): MappableField | null {
   if (key === "horarios" || key === "horario_de_atendimento" || key === "business_hours") return "businessHours";
 
   // Dentistas e especialidades
+  // IMPORTANTE: checar "profissional + certificacao/premio" ANTES de "diferencial" para evitar conflito
   if (key.includes("dentista") || (key.includes("especialidade") && key.includes("nome"))) return "specialists";
-  if (key.includes("profissional") && (key.includes("certificacao") || key.includes("diferencial") || key.includes("premio"))) return "specialists";
+  if (key.includes("profissional") && (key.includes("certificacao") || key.includes("premio"))) return "specialists";
 
   // Tecnologias e equipamentos (incluindo colunas "Outros")
   if (key.includes("tecnologia") || key.includes("equipamento")) return "technologies";
 
-  // Diferenciais — colunas específicas + "Conforto e Experiência"
-  if (key.includes("diferencial") || key.includes("conforto") || key.includes("experiencia")) return "differentials";
-  if (key.includes("primeira_consulta") || key.includes("avaliacao") || key.includes("como_funciona")) return "differentials";
+  // Diferenciais de tratamento — apenas colunas que explicitamente falam de diferenciais/conforto
+  // "Como funciona a avaliação" vai para mandatoryPhrases, não aqui
+  if (key.includes("diferencial") && !key.includes("profissional")) return "differentials";
+  if (key.includes("conforto") || key.includes("experiencia")) return "differentials";
 
-  // Tom / informalidade
+  // Tom / informalidade (apenas coluna específica de informalidade — NÃO "Tratamento: você/tu")
   if (key.includes("informalidade") || key.includes("nivel_de_informal") || key.includes("tom_desejado") || key === "tom" || key === "tone") return "tone";
-
-  // Tratamento (você/tu) — vai junto com tom
-  if (key === "tratamento" && !key.includes("tratamento_de")) return "tone";
 
   // Público-alvo
   if (key.includes("publico_alvo") || key.includes("publico_alv") || key === "publico") return "targetAudience";
@@ -102,14 +101,16 @@ function detectField(key: string): MappableField | null {
   // Pagamento
   if (key.includes("pagamento") || key.includes("parcelamento") || key.includes("payment")) return "paymentInfo";
 
-  // Restrições / o que Sofia NUNCA deve fazer
+  // Restrições — APENAS o que Sofia nunca deve fazer/falar
   if (key.includes("nunca") || key.includes("restricao") || key.includes("restricoes") || key.includes("proibid")) return "restrictions";
+  // Urgência e procedimento de urgência também são regras para Sofia
   if (key.includes("urgencia") || key.includes("como_proceder") || key.includes("se_sim")) return "restrictions";
-  if (key.includes("dados_obrigatorios") || key.includes("deve_coletar")) return "restrictions";
 
-  // Frases obrigatórias / o que Sofia SEMPRE deve mencionar
+  // Frases obrigatórias — o que Sofia SEMPRE deve mencionar + dados obrigatórios para agendar + como funciona a avaliação
   if (key.includes("sempre") || key.includes("frases_obrigatorias") || key.includes("obrigatorio")) return "mandatoryPhrases";
   if (key.includes("informacoes_importantes") || key.includes("mandatory")) return "mandatoryPhrases";
+  if (key.includes("primeira_consulta") || key.includes("avaliacao") || key.includes("como_funciona")) return "mandatoryPhrases";
+  if (key.includes("dados_obrigatorios") || key.includes("deve_coletar")) return "mandatoryPhrases";
 
   // Modo de agendamento
   if (key.includes("sofia_agenda") || key.includes("modo_agendamento") || key === "scheduling_mode") return "schedulingMode";
@@ -126,11 +127,12 @@ function normalizeTone(existing: string | undefined, newValue: string): string {
   const v = newValue.toLowerCase();
   let tone = existing ?? "";
 
-  if (v.includes("formal") && !v.includes("informal")) {
-    tone = "FORMAL";
-  } else if (v.includes("semi") || v.includes("informal") || v.includes("moderado") || v.includes("moderately")) {
+  // IMPORTANTE: checar "semi" antes de "formal" — "semi-formal" contém "formal" mas é INFORMAL_MODERATE
+  if (v.includes("semi") || v.includes("informal") || v.includes("moderado") || v.includes("moderately")) {
     tone = "INFORMAL_MODERATE";
-  } else if (v.includes("descont") || v.includes("casual") || v.includes("informal")) {
+  } else if (v.includes("formal")) {
+    tone = "FORMAL";
+  } else if (v.includes("descont") || v.includes("casual")) {
     tone = "CASUAL";
   } else {
     // Guarda o texto livre se não conseguiu mapear para enum
