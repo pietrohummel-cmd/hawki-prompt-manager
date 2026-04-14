@@ -1,13 +1,191 @@
-// This is your Prisma schema file,
-// learn more about it in the docs: https://pris.ly/d/prisma-schema
-
-// Get a free hosted Postgres database in seconds: `npx create-db`
+// Hawki Prompt Manager — Prisma Schema
+// PostgreSQL via Prisma ORM
 
 generator client {
-  provider = "prisma-client"
-  output   = "../src/generated/prisma"
+  provider = "prisma-client-js"
 }
 
 datasource db {
   provider = "postgresql"
+}
+
+// ─────────────────────────────────────────────
+// Enums
+// ─────────────────────────────────────────────
+
+enum SchedulingSystem {
+  CLINICORP
+  CONTROLE_ODONTO
+  SIMPLES_DENTAL
+  GOOGLE_AGENDA
+}
+
+enum SchedulingMode {
+  DIRECT   // Sofia agenda diretamente via API
+  HANDOFF  // Sofia passa para humano
+  LINK     // Sofia envia link de agendamento
+}
+
+enum ClientTone {
+  FORMAL
+  INFORMAL_MODERATE
+  CASUAL
+}
+
+enum ClientStatus {
+  ONBOARDING
+  ACTIVE
+  ARCHIVED
+}
+
+enum ModuleKey {
+  IDENTITY
+  ABSOLUTE_RULES
+  INJECTION_PROTECTION
+  CONVERSATION_STATE
+  CONVERSATION_RESUME
+  PRESENTATION
+  COMMUNICATION_STYLE
+  HUMAN_BEHAVIOR
+  ACTIVE_LISTENING
+  ATTENDANCE_STAGES
+  QUALIFICATION
+  SLOT_OFFER
+  COMMITMENT_CONFIRMATION
+  OPENING
+  FINAL_OBJECTIVE
+  AUDIO_RULES
+  STATUS_RULES
+  HANDOFF
+}
+
+enum GeneratedBy {
+  AI
+  MANUAL
+}
+
+enum TicketPriority {
+  CRITICAL
+  NORMAL
+  IMPROVEMENT
+}
+
+enum TicketStatus {
+  OPEN
+  SUGGESTED
+  APPROVED
+  APPLIED
+  REJECTED
+}
+
+// ─────────────────────────────────────────────
+// Client — dados do cliente (clínica)
+// ─────────────────────────────────────────────
+
+model Client {
+  id                String           @id @default(cuid())
+  name              String           // nome do contato / responsável
+  clinicName        String           // nome da clínica (como aparece nas mensagens)
+  assistantName     String           @default("Sofia")
+  city              String?
+  neighborhood      String?
+  address           String?
+  reference         String?          // ponto de referência
+  phone             String?
+  instagram         String?
+  website           String?
+  attendantName     String?          // responsável humano no handoff
+  schedulingSystem  SchedulingSystem?
+  schedulingMode    SchedulingMode?
+  tone              ClientTone?
+  targetAudience    String?          // texto livre: público-alvo
+  ageRange          String?          // ex: "40+", "18-35"
+  restrictions      String?          // o que Sofia nunca pode fazer/dizer
+  mandatoryPhrases  String?          // frases que Sofia deve usar
+  paymentInfo       String?          // formas de pagamento
+  specialists       String?          // dentistas e especialidades (texto livre)
+  technologies      String?          // equipamentos e tecnologias confirmadas
+  differentials     String?          // diferenciais reais da clínica
+  businessHours     String?          // horários de atendimento
+  status            ClientStatus     @default(ONBOARDING)
+  createdAt         DateTime         @default(now())
+  updatedAt         DateTime         @updatedAt
+
+  promptVersions    PromptVersion[]
+  tickets           CorrectionTicket[]
+  onboardingUploads OnboardingUpload[]
+}
+
+// ─────────────────────────────────────────────
+// PromptVersion — versão completa do prompt
+// ─────────────────────────────────────────────
+
+model PromptVersion {
+  id              String      @id @default(cuid())
+  clientId        String
+  client          Client      @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  version         Int         // sequencial: 1, 2, 3...
+  systemPrompt    String      @db.Text // prompt técnico completo (hash-delimitado)
+  ragDocument     String?     @db.Text // base de conhecimento factual (separada)
+  narrativeManual String?     @db.Text // Prompt 2 — manual narrativo (opcional)
+  isActive        Boolean     @default(false)
+  generatedBy     GeneratedBy @default(AI)
+  changesSummary  String?     // resumo do que mudou nessa versão
+  createdAt       DateTime    @default(now())
+
+  modules         PromptModule[]
+  tickets         CorrectionTicket[]
+
+  @@unique([clientId, version])
+}
+
+// ─────────────────────────────────────────────
+// PromptModule — módulo individual de uma versão
+// ─────────────────────────────────────────────
+
+model PromptModule {
+  id              String        @id @default(cuid())
+  promptVersionId String
+  promptVersion   PromptVersion @relation(fields: [promptVersionId], references: [id], onDelete: Cascade)
+  moduleKey       ModuleKey
+  content         String        @db.Text
+  updatedAt       DateTime      @updatedAt
+
+  @@unique([promptVersionId, moduleKey])
+}
+
+// ─────────────────────────────────────────────
+// CorrectionTicket — ticket de correção
+// ─────────────────────────────────────────────
+
+model CorrectionTicket {
+  id                     String         @id @default(cuid())
+  clientId               String
+  client                 Client         @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  promptVersionId        String
+  promptVersion          PromptVersion  @relation(fields: [promptVersionId], references: [id])
+  description            String         @db.Text
+  conversationTranscript String?        @db.Text
+  affectedModule         ModuleKey?
+  priority               TicketPriority @default(NORMAL)
+  status                 TicketStatus   @default(OPEN)
+  aiSuggestion           String?        @db.Text
+  finalCorrection        String?        @db.Text
+  resolvedInVersionId    String?
+  createdAt              DateTime       @default(now())
+  resolvedAt             DateTime?
+}
+
+// ─────────────────────────────────────────────
+// OnboardingUpload — CSV original do cliente
+// ─────────────────────────────────────────────
+
+model OnboardingUpload {
+  id          String   @id @default(cuid())
+  clientId    String
+  client      Client   @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  fileName    String
+  fileUrl     String   // URL no Supabase Storage
+  parsedData  Json     // campos extraídos do CSV
+  createdAt   DateTime @default(now())
 }
