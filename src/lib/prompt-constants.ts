@@ -1,0 +1,43 @@
+import type { ModuleKey } from "@/generated/prisma";
+
+export const MODULE_LABELS: Record<ModuleKey, string> = {
+  IDENTITY: "Identidade",
+  ABSOLUTE_RULES: "Regras Absolutas",
+  INJECTION_PROTECTION: "Proteção contra Injeção de Prompt",
+  CONVERSATION_STATE: "Estado da Conversa",
+  CONVERSATION_RESUME: "Retomada de Conversa",
+  PRESENTATION: "Apresentação",
+  COMMUNICATION_STYLE: "Estilo de Comunicação",
+  HUMAN_BEHAVIOR: "Comportamento Humano",
+  ACTIVE_LISTENING: "Escuta Ativa",
+  ATTENDANCE_STAGES: "Etapas do Atendimento",
+  QUALIFICATION: "Qualificação (SPIN)",
+  SLOT_OFFER: "Oferta de Horário",
+  COMMITMENT_CONFIRMATION: "Confirmação de Compromisso",
+  OPENING: "Abertura",
+  FINAL_OBJECTIVE: "Objetivo Final",
+  AUDIO_RULES: "Regras para Áudio",
+  STATUS_RULES: "Regras de Status",
+  HANDOFF: "Passagem para Humano",
+};
+
+export const MODULE_ORDER: ModuleKey[] = [
+  "IDENTITY",
+  "ABSOLUTE_RULES",
+  "INJECTION_PROTECTION",
+  "CONVERSATION_STATE",
+  "CONVERSATION_RESUME",
+  "PRESENTATION",
+  "COMMUNICATION_STYLE",
+  "HUMAN_BEHAVIOR",
+  "ACTIVE_LISTENING",
+  "ATTENDANCE_STAGES",
+  "QUALIFICATION",
+  "SLOT_OFFER",
+  "COMMITMENT_CONFIRMATION",
+  "OPENING",
+  "FINAL_OBJECTIVE",
+  "AUDIO_RULES",
+  "STATUS_RULES",
+  "HANDOFF",
+];

@@ -106,13 +106,20 @@ model Client {
   tone              ClientTone?
   targetAudience    String?          // texto livre: público-alvo
   ageRange          String?          // ex: "40+", "18-35"
-  restrictions      String?          // o que Sofia nunca pode fazer/dizer
-  mandatoryPhrases  String?          // frases que Sofia deve usar
-  paymentInfo       String?          // formas de pagamento
+  restrictions          String?          // o que Sofia nunca pode fazer/dizer
+  mandatoryPhrases      String?          // informações que Sofia SEMPRE deve mencionar (campo "Informações importantes")
+  consultationInfo      String?          // como funciona a primeira consulta / avaliação
+  schedulingRequirements String?         // dados obrigatórios para agendar (o que Sofia deve coletar)
+  paymentInfo           String?          // formas de pagamento
+  urgencyHandling       String?          // atende urgência odontológica? (Sim/Não)
+  urgencyProcedure      String?          // como Sofia deve proceder em casos de urgência
   specialists       String?          // dentistas e especialidades (texto livre)
+  certifications    String?          // certificações, prêmios ou diferenciais dos profissionais
   technologies      String?          // equipamentos e tecnologias confirmadas
   differentials     String?          // diferenciais reais da clínica
   businessHours     String?          // horários de atendimento
+  procedureType     String?          // especialidade majoritária (ex: Ortodontia, Implantes, Estética)
+  clinicPositioning String?          // posicionamento (ex: Popular, Intermediária, Premium, Boutique)
   status            ClientStatus     @default(ONBOARDING)
   createdAt         DateTime         @default(now())
   updatedAt         DateTime         @updatedAt
@@ -120,6 +127,7 @@ model Client {
   promptVersions    PromptVersion[]
   tickets           CorrectionTicket[]
   onboardingUploads OnboardingUpload[]
+  apiUsageLogs      ApiUsageLog[]
 }
 
 // ─────────────────────────────────────────────
@@ -180,6 +188,52 @@ model CorrectionTicket {
   resolvedInVersionId    String?
   createdAt              DateTime       @default(now())
   resolvedAt             DateTime?
+}
+
+// ─────────────────────────────────────────────
+// ApiUsageLog — rastreamento de custo por operação
+// ─────────────────────────────────────────────
+
+model ApiUsageLog {
+  id           String   @id @default(cuid())
+  clientId     String?
+  client       Client?  @relation(fields: [clientId], references: [id], onDelete: SetNull)
+  operation    String   // "generate_prompt" | "suggest_module" | "suggest_ticket" | "import_restructure"
+  model        String   // "claude-sonnet-4-6" | "claude-haiku-4-5-20251001"
+  inputTokens  Int
+  outputTokens Int
+  costUsd      Float
+  createdAt    DateTime @default(now())
+}
+
+// ─────────────────────────────────────────────
+// KnowledgeDocument — base de conhecimento da Hawki
+// ─────────────────────────────────────────────
+
+model KnowledgeDocument {
+  id        String   @id @default(cuid())
+  title     String
+  content   String   @db.Text
+  category  String?  // ex: "pesquisa-mercado", "boas-praticas", "comunicacao"
+  tags      String[] // ex: ["implante", "boutique", "spin"]
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+// ─────────────────────────────────────────────
+// PromptTemplate — templates universais de prompt
+// ─────────────────────────────────────────────
+
+model PromptTemplate {
+  id          String   @id @default(cuid())
+  name        String
+  description String?
+  content     String   @db.Text // prompt completo no formato ###MÓDULO###
+  version     String   @default("v1.0")
+  isActive    Boolean  @default(true)
+  tags        String[] // ex: ["ortodontia", "boutique", "popular"]
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
 }
 
 // ─────────────────────────────────────────────

@@ -46,6 +46,7 @@ export interface ParsedOnboardingData {
   website?: string;
   businessHours?: string;
   specialists?: string;
+  certifications?: string;
   technologies?: string;
   differentials?: string;
   tone?: string;
@@ -53,11 +54,15 @@ export interface ParsedOnboardingData {
   ageRange?: string;
   paymentInfo?: string;
   restrictions?: string;
-  mandatoryPhrases?: string;
+  mandatoryPhrases?: string;       // informações que Sofia SEMPRE deve mencionar
+  consultationInfo?: string;       // como funciona a primeira consulta / avaliação
+  schedulingRequirements?: string; // dados obrigatórios para agendar
   schedulingMode?: string;
   schedulingSystem?: string;
   emojiUsage?: string;
   treatmentPronoun?: string;
+  urgencyHandling?: string;   // "Sim" / "Não"
+  urgencyProcedure?: string;  // como proceder em urgência
   // campos não mapeados ficam aqui
   unmapped: Record<string, string>;
 }

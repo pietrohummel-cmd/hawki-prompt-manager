@@ -27,13 +27,20 @@ const createClientSchema = z.object({
   ageRange: z.string().optional(),
   restrictions: z.string().optional(),
   mandatoryPhrases: z.string().optional(),
+  consultationInfo: z.string().optional(),
+  schedulingRequirements: z.string().optional(),
   paymentInfo: z.string().optional(),
+  urgencyHandling: z.string().optional(),
+  urgencyProcedure: z.string().optional(),
   specialists: z.string().optional(),
+  certifications: z.string().optional(),
   technologies: z.string().optional(),
   differentials: z.string().optional(),
   businessHours: z.string().optional(),
   emojiUsage: z.string().optional(),
   treatmentPronoun: z.string().optional(),
+  procedureType: z.string().optional(),
+  clinicPositioning: z.string().optional(),
 });
 
 export async function POST(request: Request) {
@@ -50,8 +57,16 @@ export async function POST(request: Request) {
     );
   }
 
-  const client = await prisma.client.create({ data: parsed.data });
-  return NextResponse.json(client, { status: 201 });
+  try {
+    const client = await prisma.client.create({ data: parsed.data });
+    return NextResponse.json(client, { status: 201 });
+  } catch (err) {
+    console.error("[POST /api/clients]", err);
+    return NextResponse.json(
+      { error: "Erro ao salvar cliente", detail: String(err) },
+      { status: 500 }
+    );
+  }
 }
 
 export async function GET() {

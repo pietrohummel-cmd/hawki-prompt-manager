@@ -2,7 +2,7 @@ import Papa from "papaparse";
 import * as XLSX from "xlsx";
 import type { ParsedOnboardingData } from "@/types";
 
-type MappableField = keyof Omit<ParsedOnboardingData, "unmapped">;
+type MappableField = keyof Omit<ParsedOnboardingData, "unmapped" | "urgencyHandling" | "urgencyProcedure" | "consultationInfo" | "schedulingRequirements">;
 
 // Normaliza string: lowercase, sem acentos, sem espaços/pontuação → underscore
 function normalize(str: string): string {
@@ -87,16 +87,18 @@ function detectField(key: string): MappableField | null {
   if (key === "horarios" || key === "horario_de_atendimento" || key === "business_hours") return "businessHours";
 
   // Dentistas e especialidades
-  // IMPORTANTE: checar "profissional + certificacao/premio" ANTES de "diferencial" para evitar conflito
   if (key.includes("dentista") || (key.includes("especialidade") && key.includes("nome"))) return "specialists";
-  if (key.includes("profissional") && (key.includes("certificacao") || key.includes("premio"))) return "specialists";
+
+  // Certificações, prêmios e diferenciais dos profissionais
+  // "Algum profissional tem certificação/prêmio/diferencial importante?"
+  if (key.includes("profissional") && (key.includes("certificacao") || key.includes("premio") || key.includes("diferencial"))) return "certifications";
 
   // Tecnologias e equipamentos (incluindo colunas "Outros")
   if (key.includes("tecnologia") || key.includes("equipamento")) return "technologies";
 
-  // Diferenciais de tratamento — apenas colunas que explicitamente falam de diferenciais/conforto
-  // "Como funciona a avaliação" vai para mandatoryPhrases, não aqui
-  if (key.includes("diferencial") && !key.includes("profissional")) return "differentials";
+  // Diferenciais de tratamento
+  // Usar "diferencia" para capturar tanto "diferencial" (singular) quanto "diferenciais" (plural)
+  if (key.includes("diferencia") && !key.includes("profissional")) return "differentials";
   if (key.includes("conforto") || key.includes("experiencia")) return "differentials";
 
   // Tom / informalidade
@@ -119,14 +121,9 @@ function detectField(key: string): MappableField | null {
 
   // Restrições — APENAS o que Sofia nunca deve fazer/falar
   if (key.includes("nunca") || key.includes("restricao") || key.includes("restricoes") || key.includes("proibid")) return "restrictions";
-  // Urgência e procedimento de urgência também são regras para Sofia
-  if (key.includes("urgencia") || key.includes("como_proceder") || key.includes("se_sim")) return "restrictions";
 
-  // Frases obrigatórias — o que Sofia SEMPRE deve mencionar + dados obrigatórios para agendar + como funciona a avaliação
-  if (key.includes("sempre") || key.includes("frases_obrigatorias") || key.includes("obrigatorio")) return "mandatoryPhrases";
-  if (key.includes("informacoes_importantes") || key.includes("mandatory")) return "mandatoryPhrases";
-  if (key.includes("primeira_consulta") || key.includes("avaliacao") || key.includes("como_funciona")) return "mandatoryPhrases";
-  if (key.includes("dados_obrigatorios") || key.includes("deve_coletar")) return "mandatoryPhrases";
+  // Informações que Sofia SEMPRE deve mencionar (campo "Informações importantes")
+  if (key.includes("sempre") || key.includes("frases_obrigatorias") || key.includes("informacoes_importantes") || key.includes("mandatory")) return "mandatoryPhrases";
 
   // Modo de agendamento
   if (key.includes("sofia_agenda") || key.includes("modo_agendamento") || key === "scheduling_mode") return "schedulingMode";
@@ -138,18 +135,38 @@ function detectField(key: string): MappableField | null {
   return null;
 }
 
+// Detecta campos fora do MappableField (urgência, consulta, agendamento)
+function detectSpecialField(key: string): "urgencyHandling" | "urgencyProcedure" | "consultationInfo" | "schedulingRequirements" | null {
+  // "A clínica atende urgência odontológica?" → Sim/Não
+  if (key.includes("atende") && key.includes("urgencia")) return "urgencyHandling";
+  if (key.includes("urgencia") && key.includes("odontologica")) return "urgencyHandling";
+  // "Se sim, como proceder:" → procedimento de urgência
+  if (key.includes("como_proceder") || key.includes("se_sim")) return "urgencyProcedure";
+  // "Como funciona a Primeira Consulta / Avaliação?" → consultationInfo
+  if (key.includes("primeira_consulta") || key.includes("avaliacao") || key.includes("como_funciona")) return "consultationInfo";
+  // "Dados obrigatórios para agendar" / "o que Sofia deve coletar" → schedulingRequirements
+  if (key.includes("dados_obrigatorios") || key.includes("deve_coletar") || (key.includes("obrigatorios") && key.includes("agendar"))) return "schedulingRequirements";
+  return null;
+}
+
 // Normaliza o valor do campo "tom" para o enum ClientTone
+// Opções do GHL:
+//   "Bem informal"     → CASUAL           (E aí!, Opa!, Bora agendar?)
+//   "Informal moderado"→ INFORMAL_MODERATE (Oi, Tudo bem?, Vamos agendar?)
+//   "Semi-formal"      → FORMAL            (Olá, Como vai?, Podemos agendar?)
 function normalizeTone(existing: string | undefined, newValue: string): string {
   const v = newValue.toLowerCase();
   let tone = existing ?? "";
 
-  // IMPORTANTE: checar "semi" antes de "formal" — "semi-formal" contém "formal" mas é INFORMAL_MODERATE
-  if (v.includes("semi") || v.includes("informal") || v.includes("moderado") || v.includes("moderately")) {
-    tone = "INFORMAL_MODERATE";
-  } else if (v.includes("formal")) {
-    tone = "FORMAL";
-  } else if (v.includes("descont") || v.includes("casual")) {
+  // Bem informal — checar "bem" + "informal" antes de checar "informal" sozinho
+  if ((v.includes("bem") && v.includes("informal")) || v.includes("casual") || v.includes("descont")) {
     tone = "CASUAL";
+  // Informal moderado — checar "moderado" ou "informal" sem o qualificador "bem"
+  } else if (v.includes("moderado") || v.includes("moderately") || (v.includes("informal") && !v.includes("bem"))) {
+    tone = "INFORMAL_MODERATE";
+  // Semi-formal — o mais formal das três opções
+  } else if (v.includes("semi") || v.includes("formal")) {
+    tone = "FORMAL";
   } else {
     // Guarda o texto livre se não conseguiu mapear para enum
     tone = tone ? `${tone} | ${newValue}` : newValue;
@@ -177,6 +194,16 @@ function mapRow(row: Record<string, string>): ParsedOnboardingData {
     if (!trimmedValue) continue;
 
     const normalizedKey = normalize(rawKey);
+
+    // Verifica campos especiais (fora do MappableField) — urgência, consulta, agendamento
+    const specialField = detectSpecialField(normalizedKey);
+    if (specialField) {
+      if (!result[specialField]) {
+        result[specialField] = trimmedValue;
+      }
+      continue;
+    }
+
     const field = detectField(normalizedKey);
 
     if (!field) {
@@ -198,8 +225,10 @@ function mapRow(row: Record<string, string>): ParsedOnboardingData {
     // Campos que acumulam múltiplas colunas
     if (ACCUMULATE_FIELDS.has(field)) {
       if (!accumulator[field]) accumulator[field] = [];
-      // Ignora valores genéricos como "Outros" sozinhos
-      if (trimmedValue.toLowerCase() !== "outros") {
+      // Ignora valores genéricos: "Outros" (checkbox placeholder), "Sim"/"Não" (respostas booleanas), "..." (vazio disfarçado)
+      const lv = trimmedValue.toLowerCase();
+      const isGeneric = lv === "outros" || lv === "sim" || lv === "não" || lv === "nao" || lv === "...";
+      if (!isGeneric) {
         accumulator[field]!.push(trimmedValue);
       }
       continue;

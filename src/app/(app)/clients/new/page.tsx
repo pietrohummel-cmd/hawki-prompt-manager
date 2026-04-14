@@ -30,21 +30,28 @@ const schema = z.object({
   ageRange: z.string().optional(),
   restrictions: z.string().optional(),
   mandatoryPhrases: z.string().optional(),
+  consultationInfo: z.string().optional(),
+  schedulingRequirements: z.string().optional(),
   paymentInfo: z.string().optional(),
   specialists: z.string().optional(),
+  certifications: z.string().optional(),
   technologies: z.string().optional(),
   differentials: z.string().optional(),
   businessHours: z.string().optional(),
   emojiUsage: z.string().optional(),
   treatmentPronoun: z.string().optional(),
+  urgencyHandling: z.string().optional(),
+  urgencyProcedure: z.string().optional(),
+  procedureType: z.string().optional(),
+  clinicPositioning: z.string().optional(),
 });
 
 type FormData = z.infer<typeof schema>;
 
 const TONE_LABELS: Record<string, string> = {
-  FORMAL: "Formal",
-  INFORMAL_MODERATE: "Informal moderado",
-  CASUAL: "Descontraído",
+  CASUAL: 'Bem informal — "E aí!", "Opa!", "Bora agendar?"',
+  INFORMAL_MODERATE: 'Informal moderado — "Oi", "Tudo bem?", "Vamos agendar?"',
+  FORMAL: 'Semi-formal — "Olá", "Como vai?", "Podemos agendar?"',
 };
 
 const SCHEDULING_MODE_LABELS: Record<string, string> = {
@@ -60,36 +67,24 @@ const SCHEDULING_SYSTEM_LABELS: Record<string, string> = {
   GOOGLE_AGENDA: "Google Agenda",
 };
 
+const VALID_TONES = ["FORMAL", "INFORMAL_MODERATE", "CASUAL"] as const;
+const VALID_MODES = ["DIRECT", "HANDOFF", "LINK"] as const;
+const VALID_SYSTEMS = ["CLINICORP", "CONTROLE_ODONTO", "SIMPLES_DENTAL", "GOOGLE_AGENDA"] as const;
+
 function mapParsedToForm(parsed: ParsedOnboardingData): Partial<FormData> {
-  const toneMap: Record<string, FormData["tone"]> = {
-    formal: "FORMAL",
-    "informal moderado": "INFORMAL_MODERATE",
-    "informal_moderado": "INFORMAL_MODERATE",
-    descontrai: "CASUAL",
-    casual: "CASUAL",
-  };
+  // O csv-parser já retorna os enums em maiúsculas — usar direto evita bugs de substring
+  // (ex: "informal_moderate".includes("formal") === true, mapearia errado para FORMAL)
+  const tone = VALID_TONES.includes(parsed.tone as typeof VALID_TONES[number])
+    ? (parsed.tone as FormData["tone"])
+    : undefined;
 
-  const modeMap: Record<string, FormData["schedulingMode"]> = {
-    direct: "DIRECT",
-    agenda: "DIRECT",
-    handoff: "HANDOFF",
-    encaminha: "HANDOFF",
-    link: "LINK",
-  };
+  const schedulingMode = VALID_MODES.includes(parsed.schedulingMode as typeof VALID_MODES[number])
+    ? (parsed.schedulingMode as FormData["schedulingMode"])
+    : undefined;
 
-  const systemMap: Record<string, FormData["schedulingSystem"]> = {
-    clinicorp: "CLINICORP",
-    controle: "CONTROLE_ODONTO",
-    controle_odonto: "CONTROLE_ODONTO",
-    simples: "SIMPLES_DENTAL",
-    simples_dental: "SIMPLES_DENTAL",
-    google: "GOOGLE_AGENDA",
-    google_agenda: "GOOGLE_AGENDA",
-  };
-
-  const normTone = parsed.tone?.toLowerCase().trim() ?? "";
-  const normMode = parsed.schedulingMode?.toLowerCase().trim() ?? "";
-  const normSystem = parsed.schedulingSystem?.toLowerCase().trim() ?? "";
+  const schedulingSystem = VALID_SYSTEMS.includes(parsed.schedulingSystem as typeof VALID_SYSTEMS[number])
+    ? (parsed.schedulingSystem as FormData["schedulingSystem"])
+    : undefined;
 
   return {
     name: parsed.name,
@@ -108,6 +103,7 @@ function mapParsedToForm(parsed: ParsedOnboardingData): Partial<FormData> {
     website: parsed.website,
     businessHours: parsed.businessHours,
     specialists: parsed.specialists,
+    certifications: parsed.certifications,
     technologies: parsed.technologies,
     differentials: parsed.differentials,
     targetAudience: parsed.targetAudience,
@@ -117,9 +113,13 @@ function mapParsedToForm(parsed: ParsedOnboardingData): Partial<FormData> {
     treatmentPronoun: parsed.treatmentPronoun,
     restrictions: parsed.restrictions,
     mandatoryPhrases: parsed.mandatoryPhrases,
-    tone: Object.entries(toneMap).find(([k]) => normTone.includes(k))?.[1],
-    schedulingMode: Object.entries(modeMap).find(([k]) => normMode.includes(k))?.[1],
-    schedulingSystem: Object.entries(systemMap).find(([k]) => normSystem.includes(k))?.[1],
+    consultationInfo: parsed.consultationInfo,
+    schedulingRequirements: parsed.schedulingRequirements,
+    urgencyHandling: parsed.urgencyHandling,
+    urgencyProcedure: parsed.urgencyProcedure,
+    tone,
+    schedulingMode,
+    schedulingSystem,
   };
 }
 
@@ -184,7 +184,7 @@ export default function NewClientPage() {
 
       if (!res.ok) {
         const err = await res.json();
-        throw new Error(err.error ?? "Erro ao salvar cliente");
+        throw new Error(err.detail ? `${err.error}: ${err.detail}` : (err.error ?? "Erro ao salvar cliente"));
       }
 
       const client = await res.json();
@@ -268,6 +268,38 @@ export default function NewClientPage() {
                   <option key={v} value={v}>{l}</option>
                 ))}
               </select>
+            </Field>
+            <Field label="Tipo de procedimento majoritário">
+              <input
+                {...register("procedureType")}
+                list="procedure-types"
+                placeholder="Ex: Ortodontia, Implantes, Estética..."
+                className={input()}
+              />
+              <datalist id="procedure-types">
+                <option value="Ortodontia" />
+                <option value="Implantes e Protocolo" />
+                <option value="Estética" />
+                <option value="Clínica Geral" />
+                <option value="Endodontia" />
+                <option value="Periodontia" />
+                <option value="Odonto Pediátrica" />
+              </datalist>
+            </Field>
+            <Field label="Posicionamento da clínica">
+              <input
+                {...register("clinicPositioning")}
+                list="positioning-options"
+                placeholder="Ex: Popular, Boutique, Premium..."
+                className={input()}
+              />
+              <datalist id="positioning-options">
+                <option value="Popular" />
+                <option value="Intermediária" />
+                <option value="Premium" />
+                <option value="Boutique" />
+                <option value="Corporativa" />
+              </datalist>
             </Field>
             <Field label="Público-alvo" className="col-span-2">
               <input {...register("targetAudience")} placeholder="Ex: adultos com dor dental, interessados em implantes" className={input()} />
@@ -367,6 +399,13 @@ export default function NewClientPage() {
                 className={input()}
               />
             </Field>
+            <Field label="Certificações, prêmios e diferenciais dos profissionais">
+              <input
+                {...register("certifications")}
+                placeholder="Ex: Sim, especialidades — Dr. João certificado pela USP"
+                className={input()}
+              />
+            </Field>
             <Field label="Tecnologias e equipamentos (apenas confirmados)">
               <textarea
                 {...register("technologies")}
@@ -397,22 +436,54 @@ export default function NewClientPage() {
         {/* Seção: Regras da Sofia */}
         <Section title="Regras da Sofia">
           <div className="space-y-4">
-            <Field label="Frases obrigatórias (o que Sofia deve sempre dizer)">
+            <Field label="Como funciona a Primeira Consulta / Avaliação?">
+              <textarea
+                {...register("consultationInfo")}
+                rows={2}
+                placeholder="Ex: Avaliação completa de cortesia, passamos orçamento personalizado"
+                className={input()}
+              />
+            </Field>
+            <Field label="Dados obrigatórios para agendar (o que Sofia deve coletar)">
+              <textarea
+                {...register("schedulingRequirements")}
+                rows={2}
+                placeholder="Ex: Nome completo, Telefone com DDD, CPF, Data de nascimento"
+                className={input()}
+              />
+            </Field>
+            <Field label="Informações que Sofia SEMPRE deve mencionar">
               <textarea
                 {...register("mandatoryPhrases")}
                 rows={3}
-                placeholder="Sempre mencionar a avaliação gratuita&#10;Sempre confirmar o endereço no final"
+                placeholder="Ex: Sempre mostrar opções de pagamento&#10;Sempre confirmar data do especialista"
                 className={input()}
               />
             </Field>
-            <Field label="Restrições (o que Sofia nunca pode fazer ou dizer)">
+            <Field label="Restrições (o que Sofia NUNCA pode fazer ou dizer)">
               <textarea
                 {...register("restrictions")}
                 rows={3}
-                placeholder="Nunca mencionar o nome do concorrente X&#10;Nunca informar preço de implante antes da avaliação"
+                placeholder="Ex: Nunca prometer resultado em tempo específico"
                 className={input()}
               />
             </Field>
+            <div className="grid grid-cols-2 gap-4">
+              <Field label="Atende urgência odontológica?">
+                <select {...register("urgencyHandling")} className={input()}>
+                  <option value="">Selecione...</option>
+                  <option value="Sim">Sim</option>
+                  <option value="Não">Não</option>
+                </select>
+              </Field>
+              <Field label="Como Sofia deve proceder em urgência">
+                <input
+                  {...register("urgencyProcedure")}
+                  placeholder="Ex: Sofia passa o telefone para ligar"
+                  className={input()}
+                />
+              </Field>
+            </div>
           </div>
         </Section>
 

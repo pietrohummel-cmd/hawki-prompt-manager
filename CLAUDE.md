@@ -21,7 +21,7 @@ e abrir tickets de correção com sugestão automática do Claude.
 | Backend | Next.js Route Handlers |
 | ORM | Prisma |
 | Banco | PostgreSQL |
-| IA | Anthropic API — `claude-sonnet-4-20250514` |
+| IA | Anthropic API — `claude-sonnet-4-6` |
 | Auth | Clerk |
 | Storage | Supabase Storage (CSVs de onboarding, exports de prompt) |
 | Linguagem | TypeScript (`strict: true`) |
@@ -37,7 +37,7 @@ e abrir tickets de correção com sugestão automática do Claude.
 
 ---
 
-## Estrutura de pastas
+## Estrutura de pastas (estado atual)
 
 ```
 /
@@ -48,24 +48,39 @@ e abrir tickets de correção com sugestão automática do Claude.
 │   └── schema.prisma
 └── src/
     ├── app/
-    │   ├── dashboard/               ← visão geral dos clientes
-    │   ├── clients/
-    │   │   ├── new/                 ← cadastro + upload CSV
-    │   │   └── [id]/
-    │   │       ├── prompt/          ← editor por módulos
-    │   │       ├── versions/        ← histórico de versões
-    │   │       └── tickets/         ← tickets de correção
-    │   └── api/
-    │       ├── clients/
-    │       ├── prompts/
-    │       ├── versions/
-    │       └── tickets/
+    │   ├── (app)/                         ← grupo de rota (layout com sidebar)
+    │   │   ├── layout.tsx
+    │   │   ├── dashboard/
+    │   │   │   └── page.tsx
+    │   │   └── clients/
+    │   │       ├── page.tsx               ← listagem de clientes
+    │   │       ├── new/
+    │   │       │   └── page.tsx           ← cadastro + upload CSV
+    │   │       └── [id]/
+    │   │           └── prompt/
+    │   │               └── page.tsx       ← visualização/geração de prompt por módulos
+    │   ├── api/
+    │   │   └── clients/
+    │   │       ├── route.ts               ← GET (listar) + POST (criar cliente)
+    │   │       └── [id]/
+    │   │           ├── route.ts           ← GET (buscar cliente com promptVersions)
+    │   │           └── generate-prompt/
+    │   │               └── route.ts       ← POST (gerar prompt via Anthropic)
+    │   ├── sign-in/ e sign-up/            ← páginas Clerk
+    │   ├── layout.tsx
+    │   └── page.tsx                       ← redirect para /clients
     ├── components/
+    │   ├── sidebar.tsx
+    │   └── ui/button.tsx
     ├── lib/
-    │   ├── prompt-generator.ts      ← geração via Anthropic API
-    │   ├── csv-parser.ts            ← parse de planilhas de onboarding
-    │   └── module-editor.ts         ← edição isolada por módulo
-    └── types/
+    │   ├── generate-prompt.ts             ← geração via Anthropic API (função principal)
+    │   ├── prompt-constants.ts            ← MODULE_LABELS e MODULE_ORDER
+    │   ├── csv-parser.ts                  ← parse de planilhas de onboarding
+    │   ├── prisma.ts                      ← instância singleton do Prisma Client
+    │   └── utils.ts
+    ├── generated/prisma/                  ← client Prisma gerado
+    ├── types/index.ts
+    └── proxy.ts
 ```
 
 ---
@@ -93,26 +108,40 @@ Client → OnboardingUpload (CSV original)
 
 ## Os 18 módulos do prompt (enum `ModuleKey`)
 
-| Key | Nome no prompt |
-|-----|---------------|
-| `IDENTITY` | IDENTIDADE DO ASSISTENTE |
-| `ABSOLUTE_RULES` | REGRAS ABSOLUTAS |
-| `INJECTION_PROTECTION` | PROTEÇÃO CONTRA PROMPT INJECTION |
-| `CONVERSATION_STATE` | ESTADO DA CONVERSA |
-| `CONVERSATION_RESUME` | RETOMADA DE CONVERSA |
-| `PRESENTATION` | APRESENTAÇÃO |
-| `COMMUNICATION_STYLE` | ESTILO DE COMUNICAÇÃO |
-| `HUMAN_BEHAVIOR` | COMPORTAMENTO HUMANO |
-| `ACTIVE_LISTENING` | ESCUTA ATIVA |
-| `ATTENDANCE_STAGES` | ETAPAS DO ATENDIMENTO |
-| `QUALIFICATION` | QUALIFICAÇÃO DE PACIENTES / LEADS |
-| `SLOT_OFFER` | OFERTA DE HORÁRIOS |
-| `COMMITMENT_CONFIRMATION` | CONFIRMAÇÃO DE COMPROMISSO |
-| `OPENING` | ABERTURA DA CONVERSA |
-| `FINAL_OBJECTIVE` | OBJETIVO FINAL |
-| `AUDIO_RULES` | REGRAS DE ÁUDIO |
-| `STATUS_RULES` | REGRAS DE STATUS |
-| `HANDOFF` | HANDOFF INSTRUCTIONS |
+| Key | Label (`MODULE_LABELS`) |
+|-----|------------------------|
+| `IDENTITY` | Identidade |
+| `ABSOLUTE_RULES` | Regras Absolutas |
+| `INJECTION_PROTECTION` | Proteção contra Injeção de Prompt |
+| `CONVERSATION_STATE` | Estado da Conversa |
+| `CONVERSATION_RESUME` | Retomada de Conversa |
+| `PRESENTATION` | Apresentação |
+| `COMMUNICATION_STYLE` | Estilo de Comunicação |
+| `HUMAN_BEHAVIOR` | Comportamento Humano |
+| `ACTIVE_LISTENING` | Escuta Ativa |
+| `ATTENDANCE_STAGES` | Etapas do Atendimento |
+| `QUALIFICATION` | Qualificação (SPIN) |
+| `SLOT_OFFER` | Oferta de Horário |
+| `COMMITMENT_CONFIRMATION` | Confirmação de Compromisso |
+| `OPENING` | Abertura |
+| `FINAL_OBJECTIVE` | Objetivo Final |
+| `AUDIO_RULES` | Regras para Áudio |
+| `STATUS_RULES` | Regras de Status |
+| `HANDOFF` | Passagem para Humano |
+
+A ordem canônica está em `MODULE_ORDER` em `src/lib/prompt-constants.ts`.
+O formato no prompt é `###MÓDULO:KEY###\n[conteúdo]`.
+
+---
+
+## Fluxo de geração de prompt
+
+1. `POST /api/clients/[id]/generate-prompt` chama `generateClientPrompt(client)` em `src/lib/generate-prompt.ts`
+2. Constrói contexto da clínica (`buildClientContext`) e system prompt (`buildSystemPromptForGeneration`)
+3. Envia para Anthropic (`claude-sonnet-4-6`, max_tokens: 8192) pedindo os 18 módulos no formato hash-delimitado
+4. Faz parse com regex em `parseModules(text)` → `Partial<Record<ModuleKey, string>>`
+5. Salva nova `PromptVersion` com os módulos, desativa versão anterior, atualiza `client.status = ACTIVE`
+6. Retorna a versão criada com `include: { modules: true }`
 
 ---
 
@@ -124,7 +153,7 @@ Client → OnboardingUpload (CSV original)
 - Arquivos: `kebab-case`
 - Route Handlers: `src/app/api/[recurso]/route.ts`
 - Lógica de negócio: `src/lib/` — nunca dentro de componentes
-- Chamadas à Anthropic: apenas em `src/lib/prompt-generator.ts` e `src/lib/module-editor.ts`
+- Chamadas à Anthropic: apenas em `src/lib/generate-prompt.ts`
 - Validação de input: Zod em todos os endpoints
 - Path alias: `@/` aponta para `src/`
 
@@ -142,16 +171,23 @@ NEXT_PUBLIC_SUPABASE_ANON_KEY
 SUPABASE_SERVICE_ROLE_KEY
 ```
 
-Ver `.env.example` para referência.
-
 ---
 
-## Fases de desenvolvimento
+## Status de implementação (atualizado 2026-04-14)
 
 - [x] **Fase 1** — Setup do projeto, Prisma schema, Auth (Clerk), layout base com sidebar
-- [ ] **Fase 2** — Cadastro de cliente + upload CSV (parse fuzzy de colunas)
-- [ ] **Fase 3** — Geração de prompt via Anthropic API (função `generatePrompt`)
+- [x] **Fase 2** — Cadastro de cliente + upload CSV (parse fuzzy de colunas via `csv-parser.ts`)
+- [x] **Fase 3** — Geração de prompt via Anthropic API (`generate-prompt.ts`, rota `generate-prompt/route.ts`, UI em `prompt/page.tsx` com accordion por módulo + skeleton de loading)
 - [ ] **Fase 4** — Editor por módulos (18 cards, modal de edição, sugestão de IA por módulo)
 - [ ] **Fase 5** — Histórico de versões + diff visual + export `.txt`
 - [ ] **Fase 6** — Tickets de correção com sugestão automática do Claude
 - [ ] **Fase 7** — Dashboard (cards por cliente, tickets abertos, atividade recente)
+
+### O que funciona hoje (Fase 3 concluída)
+- Listar clientes em `/clients` com status, contagem de versões e tickets
+- Criar cliente manualmente ou via upload de CSV/XLSX em `/clients/new`
+- Visualizar prompt de um cliente em `/clients/[id]/prompt`
+- Gerar/regenerar prompt completo (18 módulos) via botão na UI
+- Accordion para expandir/recolher cada módulo individualmente
+- Visualização do prompt completo em texto bruto (detalhes ocultos)
+- Versões numeradas e apenas 1 ativa por cliente
