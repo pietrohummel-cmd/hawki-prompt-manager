@@ -30,6 +30,7 @@ export type {
 
 // Dados parseados de um CSV de onboarding
 export interface ParsedOnboardingData {
+  name?: string;          // nome do responsável / contato
   clinicName?: string;
   assistantName?: string;
   attendantName?: string;

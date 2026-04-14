@@ -2,9 +2,12 @@ import Papa from "papaparse";
 import * as XLSX from "xlsx";
 import type { ParsedOnboardingData } from "@/types";
 
-// Normaliza string para comparação fuzzy: lowercase, sem acentos, sem espaços extras
+type MappableField = keyof Omit<ParsedOnboardingData, "unmapped">;
+
+// Normaliza string: lowercase, sem acentos, sem espaços/pontuação → underscore
 function normalize(str: string): string {
   return str
+    .trim()
     .toLowerCase()
     .normalize("NFD")
     .replace(/[\u0300-\u036f]/g, "")
@@ -13,139 +16,187 @@ function normalize(str: string): string {
     .replace(/^_|_$/g, "");
 }
 
-// Mapa de variações de nomes de colunas → campo interno
-const COLUMN_MAP: Record<string, keyof Omit<ParsedOnboardingData, "unmapped">> = {
+// Campos que acumulam valor de múltiplas colunas (separados por \n)
+const ACCUMULATE_FIELDS = new Set<MappableField>([
+  "technologies",
+  "differentials",
+  "restrictions",
+  "mandatoryPhrases",
+  "specialists",
+]);
+
+// Colunas a ignorar (metadados do formulário)
+const IGNORE_KEYWORDS = [
+  "timezone", "submission_date", "source", "fbEventId", "medium",
+  "mediumid", "documenturl", "url", "submission", "source",
+];
+
+// Detecção por palavras-chave na coluna normalizada
+// Retorna o campo mapeado ou null se não reconhecido
+function detectField(key: string): MappableField | null {
+  // Ignorar metadados do formulário
+  if (IGNORE_KEYWORDS.some((k) => key.includes(k))) return null;
+
+  // Nome do responsável (contato)
+  if (key === "nome_completo" || key.startsWith("nome_completo")) return "name";
+
   // Nome da clínica
-  nome_da_clinica: "clinicName",
-  nome_clinica: "clinicName",
-  clinica: "clinicName",
-  clinic_name: "clinicName",
+  if (key === "nome_clinica" || key === "nome_da_clinica" || key === "clinica") return "clinicName";
 
   // Nome da assistente
-  nome_da_assistente: "assistantName",
-  nome_assistente: "assistantName",
-  assistente: "assistantName",
-  assistant_name: "assistantName",
-  nome_sofia: "assistantName",
+  if (key.includes("nome_da_assistente") || key.includes("nome_assistente") || key === "assistente") return "assistantName";
+  if (key === "nome_sofia") return "assistantName";
 
-  // Responsável pelo agendamento humano
-  responsavel_agendamento: "attendantName",
-  responsavel_pelo_agendamento: "attendantName",
-  nome_responsavel: "attendantName",
-  atendente: "attendantName",
-  attendant_name: "attendantName",
+  // Responsável humano pelo agendamento
+  if (key.includes("responsavel") && key.includes("agendamento")) return "attendantName";
+  if (key === "atendente" || key === "nome_responsavel") return "attendantName";
 
   // Cidade
-  cidade: "city",
-  city: "city",
+  if (key === "cidade" || key === "city") return "city";
 
   // Bairro
-  bairro: "neighborhood",
-  neighborhood: "neighborhood",
+  if (key === "bairro" || key === "neighborhood") return "neighborhood";
 
   // Endereço
-  endereco: "address",
-  endereco_completo: "address",
-  address: "address",
+  if (key.startsWith("endereco") || key === "address" || key === "endereco_completo") return "address";
 
   // Ponto de referência
-  ponto_de_referencia: "reference",
-  referencia: "reference",
-  reference: "reference",
+  if (key.includes("referencia") || key.includes("ponto_de_referencia") || key.includes("localizacao")) return "reference";
 
   // Telefone / WhatsApp
-  telefone: "phone",
-  whatsapp: "phone",
-  phone: "phone",
-  celular: "phone",
+  if (key === "telefone" || key === "whatsapp" || key === "phone" || key === "celular") return "phone";
 
   // Instagram
-  instagram: "instagram",
+  if (key === "instagram") return "instagram";
 
   // Site
-  site: "website",
-  website: "website",
-  url: "website",
+  if (key === "site" || key === "website") return "website";
 
-  // Horários
-  horario_de_atendimento: "businessHours",
-  horarios_de_atendimento: "businessHours",
-  horario_atendimento: "businessHours",
-  business_hours: "businessHours",
-  horarios: "businessHours",
-  funcionamento: "businessHours",
+  // Horários de atendimento
+  if (key.includes("horario") && (key.includes("atendimento") || key.includes("clinica") || key.includes("funcionamento"))) return "businessHours";
+  if (key === "horarios" || key === "horario_de_atendimento" || key === "business_hours") return "businessHours";
 
   // Dentistas e especialidades
-  dentistas: "specialists",
-  especialidades: "specialists",
-  dentistas_e_especialidades: "specialists",
-  specialists: "specialists",
+  if (key.includes("dentista") || (key.includes("especialidade") && key.includes("nome"))) return "specialists";
+  if (key.includes("profissional") && (key.includes("certificacao") || key.includes("diferencial") || key.includes("premio"))) return "specialists";
 
-  // Tecnologias
-  tecnologias: "technologies",
-  equipamentos: "technologies",
-  technologies: "technologies",
+  // Tecnologias e equipamentos (incluindo colunas "Outros")
+  if (key.includes("tecnologia") || key.includes("equipamento")) return "technologies";
 
-  // Diferenciais
-  diferenciais: "differentials",
-  differentials: "differentials",
+  // Diferenciais — colunas específicas + "Conforto e Experiência"
+  if (key.includes("diferencial") || key.includes("conforto") || key.includes("experiencia")) return "differentials";
+  if (key.includes("primeira_consulta") || key.includes("avaliacao") || key.includes("como_funciona")) return "differentials";
 
-  // Tom desejado
-  tom_desejado: "tone",
-  tom: "tone",
-  tone: "tone",
-  estilo: "tone",
+  // Tom / informalidade
+  if (key.includes("informalidade") || key.includes("nivel_de_informal") || key.includes("tom_desejado") || key === "tom" || key === "tone") return "tone";
+
+  // Tratamento (você/tu) — vai junto com tom
+  if (key === "tratamento" && !key.includes("tratamento_de")) return "tone";
 
   // Público-alvo
-  publico_alvo: "targetAudience",
-  publico: "targetAudience",
-  target_audience: "targetAudience",
+  if (key.includes("publico_alvo") || key.includes("publico_alv") || key === "publico") return "targetAudience";
 
   // Faixa etária
-  faixa_etaria: "ageRange",
-  idade: "ageRange",
-  age_range: "ageRange",
+  if (key.includes("faixa_etaria") || key.includes("idade")) return "ageRange";
 
-  // Formas de pagamento
-  formas_de_pagamento: "paymentInfo",
-  pagamento: "paymentInfo",
-  payment: "paymentInfo",
-  parcelamento: "paymentInfo",
+  // Pagamento
+  if (key.includes("pagamento") || key.includes("parcelamento") || key.includes("payment")) return "paymentInfo";
 
-  // Restrições
-  restricoes: "restrictions",
-  o_que_sofia_nunca_pode_dizer: "restrictions",
-  restrictions: "restrictions",
+  // Restrições / o que Sofia NUNCA deve fazer
+  if (key.includes("nunca") || key.includes("restricao") || key.includes("restricoes") || key.includes("proibid")) return "restrictions";
+  if (key.includes("urgencia") || key.includes("como_proceder") || key.includes("se_sim")) return "restrictions";
+  if (key.includes("dados_obrigatorios") || key.includes("deve_coletar")) return "restrictions";
 
-  // Frases obrigatórias
-  frases_obrigatorias: "mandatoryPhrases",
-  frases: "mandatoryPhrases",
-  mandatory_phrases: "mandatoryPhrases",
+  // Frases obrigatórias / o que Sofia SEMPRE deve mencionar
+  if (key.includes("sempre") || key.includes("frases_obrigatorias") || key.includes("obrigatorio")) return "mandatoryPhrases";
+  if (key.includes("informacoes_importantes") || key.includes("mandatory")) return "mandatoryPhrases";
 
   // Modo de agendamento
-  sofia_agenda_ou_encaminha: "schedulingMode",
-  modo_agendamento: "schedulingMode",
-  scheduling_mode: "schedulingMode",
-  agendamento: "schedulingMode",
+  if (key.includes("sofia_agenda") || key.includes("modo_agendamento") || key === "scheduling_mode") return "schedulingMode";
 
   // Sistema de agendamento
-  sistema_de_agendamento: "schedulingSystem",
-  sistema: "schedulingSystem",
-  scheduling_system: "schedulingSystem",
-};
+  if (key.includes("sistema") && (key.includes("agenda") || key.includes("agendamento"))) return "schedulingSystem";
+  if (key === "sistema_de_agendamento" || key === "scheduling_system") return "schedulingSystem";
+
+  return null;
+}
+
+// Normaliza o valor do campo "tom" para o enum ClientTone
+function normalizeTone(existing: string | undefined, newValue: string): string {
+  const v = newValue.toLowerCase();
+  let tone = existing ?? "";
+
+  if (v.includes("formal") && !v.includes("informal")) {
+    tone = "FORMAL";
+  } else if (v.includes("semi") || v.includes("informal") || v.includes("moderado") || v.includes("moderately")) {
+    tone = "INFORMAL_MODERATE";
+  } else if (v.includes("descont") || v.includes("casual") || v.includes("informal")) {
+    tone = "CASUAL";
+  } else {
+    // Guarda o texto livre se não conseguiu mapear para enum
+    tone = tone ? `${tone} | ${newValue}` : newValue;
+  }
+
+  return tone;
+}
+
+// Normaliza o valor do campo "schedulingSystem" para o enum
+function normalizeSchedulingSystem(value: string): string {
+  const v = value.toLowerCase();
+  if (v.includes("clinicorp")) return "CLINICORP";
+  if (v.includes("controle")) return "CONTROLE_ODONTO";
+  if (v.includes("simples")) return "SIMPLES_DENTAL";
+  if (v.includes("google")) return "GOOGLE_AGENDA";
+  return value; // mantém texto livre se não reconheceu
+}
 
 function mapRow(row: Record<string, string>): ParsedOnboardingData {
   const result: ParsedOnboardingData = { unmapped: {} };
+  const accumulator: Partial<Record<MappableField, string[]>> = {};
 
   for (const [rawKey, value] of Object.entries(row)) {
-    if (!value?.trim()) continue;
-    const normalizedKey = normalize(rawKey);
-    const field = COLUMN_MAP[normalizedKey];
+    const trimmedValue = value?.trim();
+    if (!trimmedValue) continue;
 
-    if (field) {
-      (result as unknown as Record<string, string>)[field] = value.trim();
-    } else {
-      result.unmapped[rawKey] = value.trim();
+    const normalizedKey = normalize(rawKey);
+    const field = detectField(normalizedKey);
+
+    if (!field) {
+      result.unmapped[rawKey] = trimmedValue;
+      continue;
+    }
+
+    // Campos especiais com normalização de enum
+    if (field === "tone") {
+      result.tone = normalizeTone(result.tone, trimmedValue);
+      continue;
+    }
+    if (field === "schedulingSystem") {
+      const normalized = normalizeSchedulingSystem(trimmedValue);
+      result.schedulingSystem = normalized;
+      continue;
+    }
+
+    // Campos que acumulam múltiplas colunas
+    if (ACCUMULATE_FIELDS.has(field)) {
+      if (!accumulator[field]) accumulator[field] = [];
+      // Ignora valores genéricos como "Outros" sozinhos
+      if (trimmedValue.toLowerCase() !== "outros") {
+        accumulator[field]!.push(trimmedValue);
+      }
+      continue;
+    }
+
+    // Campo simples — primeira ocorrência vence
+    if (!(result as unknown as Record<string, string>)[field]) {
+      (result as unknown as Record<string, string>)[field] = trimmedValue;
+    }
+  }
+
+  // Consolida campos acumulados
+  for (const [field, values] of Object.entries(accumulator) as [MappableField, string[]][]) {
+    if (values.length > 0) {
+      (result as unknown as Record<string, string>)[field] = values.join("\n");
     }
   }
 
