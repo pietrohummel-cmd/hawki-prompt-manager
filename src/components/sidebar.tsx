@@ -47,7 +47,7 @@ export function Sidebar() {
 
       {/* User */}
       <div className="px-6 py-4 border-t border-zinc-800 flex items-center gap-3">
-        <UserButton afterSignOutUrl="/sign-in" />
+        <UserButton />
         <span className="text-xs text-zinc-500">Hawki</span>
       </div>
     </aside>
