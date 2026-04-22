@@ -48,10 +48,11 @@ export function ClientNav({ client }: ClientNavProps) {
   const [confirmDelete, setConfirmDelete] = useState(false);
 
   // Modal prompt completo
-  const [showPrompt, setShowPrompt]   = useState(false);
-  const [modules, setModules]         = useState<PromptModule[] | null>(null);
+  const [showPrompt, setShowPrompt]       = useState(false);
+  const [modules, setModules]             = useState<PromptModule[] | null>(null);
   const [loadingPrompt, setLoadingPrompt] = useState(false);
-  const [copied, setCopied]           = useState(false);
+  const [promptError, setPromptError]     = useState(false);
+  const [copied, setCopied]               = useState(false);
 
   // Fecha modal com Escape
   useEffect(() => {
@@ -61,22 +62,29 @@ export function ClientNav({ client }: ClientNavProps) {
     return () => window.removeEventListener("keydown", handler);
   }, [showPrompt]);
 
-  async function openPromptModal() {
-    setShowPrompt(true);
-    if (modules !== null) return; // já carregado
+  async function fetchPrompt() {
     setLoadingPrompt(true);
+    setPromptError(false);
     try {
       const res  = await fetch(`/api/clients/${client.id}`);
+      if (!res.ok) throw new Error("fetch failed");
       const data = await res.json();
       const active =
         data.promptVersions?.find((v: { isActive: boolean }) => v.isActive) ??
         data.promptVersions?.[0] ?? null;
       setModules(active?.modules ?? []);
     } catch {
-      setModules([]);
+      setModules(null); // não persistir erro como dado vazio
+      setPromptError(true);
     } finally {
       setLoadingPrompt(false);
     }
+  }
+
+  async function openPromptModal() {
+    setShowPrompt(true);
+    setModules(null); // sempre re-fetch ao abrir para dados frescos
+    fetchPrompt();
   }
 
   const fullPromptText = modules
@@ -262,6 +270,16 @@ export function ClientNav({ client }: ClientNavProps) {
                   {[...Array(6)].map((_, i) => (
                     <div key={i} className="h-3 rounded bg-[var(--surface-raised)] animate-pulse" style={{ width: `${70 + (i % 3) * 10}%` }} />
                   ))}
+                </div>
+              ) : promptError ? (
+                <div className="text-center py-10">
+                  <p className="text-[var(--text-secondary)] text-sm">Erro ao carregar o prompt.</p>
+                  <button
+                    onClick={fetchPrompt}
+                    className="press mt-3 text-[12px] text-[var(--accent-text)] border border-[var(--accent)]/30 hover:border-[var(--accent)]/60 px-3 py-1.5 rounded-md transition-all"
+                  >
+                    Tentar novamente
+                  </button>
                 </div>
               ) : fullPromptText ? (
                 <pre className="text-[12px] text-[var(--text-secondary)] whitespace-pre-wrap font-mono leading-relaxed">

@@ -5,6 +5,7 @@ import { useParams } from "next/navigation";
 import {
   Copy, Check, Download, GitCompare, X, GitBranch,
 } from "lucide-react";
+import { diffLines as myersDiffLines } from "diff";
 import type { ModuleKey } from "@/generated/prisma";
 import { MODULE_LABELS, MODULE_ORDER } from "@/lib/prompt-constants";
 import { Toast, useToast } from "@/components/toast";
@@ -28,30 +29,21 @@ interface PromptVersion {
   modules: VersionModule[];
 }
 
-/* ── Diff utilitário ────────────────────────────────────── */
+/* ── Diff utilitário (Myers LCS via "diff" lib) ─────────── */
 
 function diffLines(
   oldText: string,
   newText: string
 ): { line: string; type: "same" | "added" | "removed" }[] {
-  const oldLines = oldText.split("\n");
-  const newLines = newText.split("\n");
-  const oldSet   = new Set(oldLines);
-  const newSet   = new Set(newLines);
+  const hunks = myersDiffLines(oldText, newText, { newlineIsToken: false });
   const result: { line: string; type: "same" | "added" | "removed" }[] = [];
 
-  let i = 0, j = 0;
-  while (i < oldLines.length || j < newLines.length) {
-    const ol = oldLines[i], nl = newLines[j];
-    if      (i >= oldLines.length)        { result.push({ line: nl, type: "added" });   j++; }
-    else if (j >= newLines.length)        { result.push({ line: ol, type: "removed" }); i++; }
-    else if (ol === nl)                   { result.push({ line: ol, type: "same" });    i++; j++; }
-    else if (!newSet.has(ol))             { result.push({ line: ol, type: "removed" }); i++; }
-    else if (!oldSet.has(nl))             { result.push({ line: nl, type: "added" });   j++; }
-    else {
-      result.push({ line: ol, type: "removed" });
-      result.push({ line: nl, type: "added" });
-      i++; j++;
+  for (const hunk of hunks) {
+    const lines = hunk.value.replace(/\n$/, "").split("\n");
+    const type: "same" | "added" | "removed" =
+      hunk.added ? "added" : hunk.removed ? "removed" : "same";
+    for (const line of lines) {
+      result.push({ line, type });
     }
   }
   return result;
