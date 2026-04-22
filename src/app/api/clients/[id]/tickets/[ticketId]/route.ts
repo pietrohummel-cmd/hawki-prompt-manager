@@ -2,13 +2,13 @@ import { auth } from "@clerk/nextjs/server";
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { prisma } from "@/lib/prisma";
-import { MODULE_ORDER } from "@/lib/prompt-constants";
+import type { ModuleKey } from "@/generated/prisma";
 
 const patchSchema = z.object({
   status: z.enum(["OPEN", "SUGGESTED", "APPROVED", "APPLIED", "REJECTED"]).optional(),
   finalCorrection: z.string().optional(),
   aiSuggestion: z.string().optional(),
-  affectedModule: z.enum(MODULE_ORDER as [string, ...string[]]).nullable().optional(),
+  affectedModule: z.string().nullable().optional(),
 });
 
 /**
@@ -36,11 +36,12 @@ export async function PATCH(
 
   if (!ticket) return NextResponse.json({ error: "Ticket não encontrado" }, { status: 404 });
 
+  const { affectedModule, ...rest } = parsed.data;
   const updated = await prisma.correctionTicket.update({
     where: { id: ticketId },
     data: {
-      ...parsed.data,
-      affectedModule: parsed.data.affectedModule as import("@/generated/prisma").ModuleKey | null | undefined,
+      ...rest,
+      ...(affectedModule !== undefined ? { affectedModule: affectedModule as ModuleKey | null } : {}),
       resolvedAt:
         parsed.data.status === "APPLIED" || parsed.data.status === "REJECTED"
           ? new Date()
