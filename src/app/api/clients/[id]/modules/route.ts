@@ -15,6 +15,7 @@ const schema = z.object({
   ] as const),
   content: z.string().min(1, "Conteúdo não pode ser vazio"),
   changesSummary: z.string().optional(),
+  savedBy: z.string().optional(),
 });
 
 /**
@@ -37,7 +38,7 @@ export async function POST(
     return NextResponse.json({ error: "Dados inválidos", details: parsed.error.flatten() }, { status: 400 });
   }
 
-  const { moduleKey, content, changesSummary } = parsed.data;
+  const { moduleKey, content, changesSummary, savedBy } = parsed.data;
 
   // Busca a versão ativa com todos os módulos
   const activeVersion = await prisma.promptVersion.findFirst({
@@ -86,6 +87,7 @@ export async function POST(
         isActive: true,
         generatedBy: "MANUAL",
         changesSummary: changesSummary ?? `Módulo editado: ${moduleKey}`,
+        savedBy: savedBy ?? userId,
         modules: {
           create: newModules,
         },

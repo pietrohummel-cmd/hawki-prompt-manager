@@ -29,6 +29,26 @@ interface ClientData {
   promptVersions: PromptVersion[];
 }
 
+// Diff linha a linha simples
+function diffLines(oldText: string, newText: string) {
+  const oldLines = oldText.split("\n");
+  const newLines = newText.split("\n");
+  const oldSet = new Set(oldLines);
+  const newSet = new Set(newLines);
+  const result: { line: string; type: "same" | "added" | "removed" }[] = [];
+  let i = 0, j = 0;
+  while (i < oldLines.length || j < newLines.length) {
+    const ol = oldLines[i], nl = newLines[j];
+    if (i >= oldLines.length) { result.push({ line: nl, type: "added" }); j++; }
+    else if (j >= newLines.length) { result.push({ line: ol, type: "removed" }); i++; }
+    else if (ol === nl) { result.push({ line: ol, type: "same" }); i++; j++; }
+    else if (!newSet.has(ol)) { result.push({ line: ol, type: "removed" }); i++; }
+    else if (!oldSet.has(nl)) { result.push({ line: nl, type: "added" }); j++; }
+    else { result.push({ line: ol, type: "removed" }); result.push({ line: nl, type: "added" }); i++; j++; }
+  }
+  return result;
+}
+
 export default function PromptPage() {
   const { id } = useParams<{ id: string }>();
   const [client, setClient] = useState<ClientData | null>(null);
@@ -38,20 +58,23 @@ export default function PromptPage() {
   const [error, setError] = useState<string | null>(null);
   const [expandedModule, setExpandedModule] = useState<ModuleKey | null>(null);
 
-  // Estado do modal de edição por módulo
+  // Estado do modal de edição
   const [editingModule, setEditingModule] = useState<PromptModule | null>(null);
   const [editContent, setEditContent] = useState("");
   const [suggestion, setSuggestion] = useState<string | null>(null);
   const [suggesting, setSuggesting] = useState(false);
-  const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
+
+  // Estado do modal de confirmação de save (changelog)
+  const [showSaveConfirm, setShowSaveConfirm] = useState(false);
+  const [saveReason, setSaveReason] = useState("");
+  const [saving, setSaving] = useState(false);
 
   // Estado do modal de importação
   const [showImport, setShowImport] = useState(false);
   const [importText, setImportText] = useState("");
   const [importing, setImporting] = useState(false);
   const [importError, setImportError] = useState<string | null>(null);
-  const [importStatus, setImportStatus] = useState<string | null>(null);
 
   const loadClient = useCallback(async () => {
     try {
@@ -68,9 +91,7 @@ export default function PromptPage() {
     }
   }, [id]);
 
-  useEffect(() => {
-    loadClient();
-  }, [loadClient]);
+  useEffect(() => { loadClient(); }, [loadClient]);
 
   async function handleGenerate() {
     setGenerating(true);
@@ -92,7 +113,6 @@ export default function PromptPage() {
     if (!importText.trim()) return;
     setImporting(true);
     setImportError(null);
-    setImportStatus(null);
     try {
       const res = await fetch(`/api/clients/${id}/import-prompt`, {
         method: "POST",
@@ -103,7 +123,6 @@ export default function PromptPage() {
       if (!res.ok) throw new Error(data.error ?? "Erro ao importar");
       setShowImport(false);
       setImportText("");
-      setImportStatus(null);
       await loadClient();
     } catch (err) {
       setImportError(err instanceof Error ? err.message : "Erro ao importar");
@@ -124,6 +143,8 @@ export default function PromptPage() {
     setEditContent("");
     setSuggestion(null);
     setSaveError(null);
+    setShowSaveConfirm(false);
+    setSaveReason("");
   }
 
   async function handleSuggest() {
@@ -146,7 +167,14 @@ export default function PromptPage() {
     }
   }
 
-  async function handleSaveModule() {
+  // Abre o modal de confirmação em vez de salvar direto
+  function requestSave() {
+    setSaveError(null);
+    setSaveReason("");
+    setShowSaveConfirm(true);
+  }
+
+  async function confirmSave() {
     if (!editingModule) return;
     setSaving(true);
     setSaveError(null);
@@ -154,7 +182,11 @@ export default function PromptPage() {
       const res = await fetch(`/api/clients/${id}/modules`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ moduleKey: editingModule.moduleKey, content: editContent }),
+        body: JSON.stringify({
+          moduleKey: editingModule.moduleKey,
+          content: editContent,
+          changesSummary: saveReason.trim() || undefined,
+        }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error ?? "Erro ao salvar módulo");
@@ -162,6 +194,7 @@ export default function PromptPage() {
       await loadClient();
     } catch (err) {
       setSaveError(err instanceof Error ? err.message : "Erro ao salvar");
+      setShowSaveConfirm(false);
     } finally {
       setSaving(false);
     }
@@ -182,6 +215,10 @@ export default function PromptPage() {
   const sortedModules = activeVersion
     ? MODULE_ORDER.map((key) => activeVersion.modules.find((m) => m.moduleKey === key)).filter(Boolean) as PromptModule[]
     : [];
+
+  // Diff entre conteúdo original e editado (para o modal de confirmação)
+  const diffResult = editingModule ? diffLines(editingModule.content, editContent) : [];
+  const hasChanges = diffResult.some((l) => l.type !== "same");
 
   return (
     <>
@@ -224,7 +261,6 @@ export default function PromptPage() {
         </div>
       )}
 
-      {/* Estado vazio */}
       {!activeVersion && !generating && (
         <div className="bg-zinc-900 border border-zinc-800 rounded-lg p-12 text-center">
           <div className="text-zinc-600 text-4xl mb-4">✦</div>
@@ -233,7 +269,6 @@ export default function PromptPage() {
         </div>
       )}
 
-      {/* Skeleton durante geração */}
       {generating && (
         <div className="space-y-3">
           {MODULE_ORDER.map((key) => (
@@ -245,7 +280,6 @@ export default function PromptPage() {
         </div>
       )}
 
-      {/* Lista de módulos */}
       {activeVersion && !generating && (
         <div className="space-y-2">
           {sortedModules.map((mod, i) => (
@@ -282,7 +316,6 @@ export default function PromptPage() {
             </div>
           ))}
 
-          {/* Prompt bruto completo */}
           <details className="mt-6">
             <summary className="text-xs text-zinc-500 cursor-pointer hover:text-zinc-400 py-2">
               Ver prompt completo (texto bruto)
@@ -299,7 +332,7 @@ export default function PromptPage() {
         </div>
       )}
 
-      {/* Modal de importação de prompt existente */}
+      {/* Modal de importação */}
       {showImport && (
         <div className="fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-4">
           <div className="bg-zinc-900 border border-zinc-800 rounded-xl w-full max-w-2xl max-h-[85vh] flex flex-col shadow-2xl">
@@ -310,21 +343,17 @@ export default function PromptPage() {
               </div>
               <button onClick={() => setShowImport(false)} className="text-zinc-500 hover:text-zinc-300 text-xl leading-none">×</button>
             </div>
-
             <div className="flex-1 overflow-y-auto p-5 space-y-4">
               <div className="bg-zinc-800/50 border border-zinc-700 rounded-md px-4 py-3 text-xs text-zinc-400 leading-relaxed">
                 <p className="font-medium text-zinc-300 mb-1">Cole qualquer formato de prompt — a IA reorganiza automaticamente.</p>
-                <p className="text-zinc-500">Suporta: formato XML <code className="text-zinc-400">&lt;your_identity&gt;</code>, texto corrido, ou o formato nativo <code className="text-emerald-400">###MÓDULO:KEY###</code>.</p>
-                <p className="mt-1.5 text-zinc-600">Quando o formato não for reconhecido automaticamente, o Sonnet reorganiza o conteúdo nos 18 módulos.</p>
+                <p className="text-zinc-500">Suporta: formato XML, texto corrido, ou o formato nativo <code className="text-emerald-400">###MÓDULO:KEY###</code>.</p>
               </div>
-
               {importing && (
                 <div className="bg-zinc-800/80 border border-zinc-700 rounded-md px-4 py-3 text-xs text-zinc-300 flex items-center gap-2">
                   <span className="animate-spin inline-block w-3 h-3 border-2 border-zinc-500 border-t-emerald-400 rounded-full shrink-0" />
-                  Processando... Se o formato não for padrão, a IA está reorganizando o prompt nos 18 módulos. Pode levar até 30s.
+                  Processando... Pode levar até 30s.
                 </div>
               )}
-
               <div>
                 <label className="text-xs text-zinc-400 mb-2 block">Texto do prompt</label>
                 <textarea
@@ -335,14 +364,10 @@ export default function PromptPage() {
                   className="w-full bg-zinc-800 border border-zinc-700 text-zinc-100 text-xs rounded-md px-3 py-2.5 font-mono resize-none focus:outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500/30 leading-relaxed"
                 />
               </div>
-
               {importError && (
-                <div className="bg-red-500/10 border border-red-500/30 text-red-400 text-xs px-3 py-2 rounded-md">
-                  {importError}
-                </div>
+                <div className="bg-red-500/10 border border-red-500/30 text-red-400 text-xs px-3 py-2 rounded-md">{importError}</div>
               )}
             </div>
-
             <div className="flex items-center justify-end gap-2 px-5 py-4 border-t border-zinc-800 shrink-0">
               <button onClick={() => setShowImport(false)} className="text-sm text-zinc-400 hover:text-zinc-200 px-4 py-2">Cancelar</button>
               <button
@@ -358,24 +383,17 @@ export default function PromptPage() {
       )}
 
       {/* Modal de edição de módulo */}
-      {editingModule && (
+      {editingModule && !showSaveConfirm && (
         <div className="fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-4">
           <div className="bg-zinc-900 border border-zinc-800 rounded-xl w-full max-w-2xl max-h-[85vh] flex flex-col shadow-2xl">
-            {/* Header do modal */}
             <div className="flex items-center justify-between px-5 py-4 border-b border-zinc-800 shrink-0">
               <div>
                 <p className="text-xs text-zinc-500 uppercase tracking-widest mb-0.5">Editando módulo</p>
                 <h2 className="text-sm font-semibold text-white">{MODULE_LABELS[editingModule.moduleKey]}</h2>
               </div>
-              <button
-                onClick={closeEditModal}
-                className="text-zinc-500 hover:text-zinc-300 text-xl leading-none transition-colors"
-              >
-                ×
-              </button>
+              <button onClick={closeEditModal} className="text-zinc-500 hover:text-zinc-300 text-xl leading-none transition-colors">×</button>
             </div>
 
-            {/* Corpo do modal */}
             <div className="flex-1 overflow-y-auto p-5 space-y-4">
               <div>
                 <label className="text-xs text-zinc-400 mb-2 block">Conteúdo</label>
@@ -405,13 +423,10 @@ export default function PromptPage() {
               )}
 
               {saveError && (
-                <div className="bg-red-500/10 border border-red-500/30 text-red-400 text-xs px-3 py-2 rounded-md">
-                  {saveError}
-                </div>
+                <div className="bg-red-500/10 border border-red-500/30 text-red-400 text-xs px-3 py-2 rounded-md">{saveError}</div>
               )}
             </div>
 
-            {/* Footer do modal */}
             <div className="flex items-center justify-between px-5 py-4 border-t border-zinc-800 shrink-0">
               <button
                 onClick={handleSuggest}
@@ -419,30 +434,101 @@ export default function PromptPage() {
                 className="flex items-center gap-2 text-sm text-zinc-300 hover:text-white bg-zinc-800 hover:bg-zinc-700 px-4 py-2 rounded-md transition-colors disabled:opacity-40"
               >
                 {suggesting ? (
-                  <>
-                    <span className="animate-spin inline-block w-3 h-3 border-2 border-zinc-500 border-t-white rounded-full" />
-                    Sugerindo...
-                  </>
-                ) : (
-                  "Sugerir com IA ✦"
-                )}
+                  <><span className="animate-spin inline-block w-3 h-3 border-2 border-zinc-500 border-t-white rounded-full" />Sugerindo...</>
+                ) : "Sugerir com IA ✦"}
               </button>
               <div className="flex items-center gap-2">
-                <button
-                  onClick={closeEditModal}
-                  disabled={saving}
-                  className="text-sm text-zinc-400 hover:text-zinc-200 px-4 py-2 transition-colors"
-                >
+                <button onClick={closeEditModal} disabled={saving} className="text-sm text-zinc-400 hover:text-zinc-200 px-4 py-2 transition-colors">
                   Cancelar
                 </button>
                 <button
-                  onClick={handleSaveModule}
-                  disabled={saving || suggesting}
+                  onClick={requestSave}
+                  disabled={saving || suggesting || !hasChanges}
                   className="bg-emerald-500 hover:bg-emerald-400 disabled:opacity-50 text-black text-sm font-medium px-5 py-2 rounded-md transition-colors"
                 >
-                  {saving ? "Salvando..." : "Salvar módulo"}
+                  Salvar módulo
                 </button>
               </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal de confirmação de save — diff + motivo */}
+      {editingModule && showSaveConfirm && (
+        <div className="fixed inset-0 z-50 bg-black/80 flex items-start justify-center p-4 overflow-y-auto">
+          <div className="bg-zinc-900 border border-zinc-800 rounded-xl w-full max-w-2xl my-8 shadow-2xl">
+            <div className="flex items-center justify-between px-5 py-4 border-b border-zinc-800">
+              <div>
+                <p className="text-xs text-zinc-500 uppercase tracking-widest mb-0.5">Confirmar alteração</p>
+                <h2 className="text-sm font-semibold text-white">{MODULE_LABELS[editingModule.moduleKey]}</h2>
+              </div>
+              <button onClick={() => setShowSaveConfirm(false)} className="text-zinc-500 hover:text-zinc-300 text-xl leading-none">×</button>
+            </div>
+
+            <div className="p-5 space-y-5">
+              {/* Diff inline */}
+              <div>
+                <p className="text-xs text-zinc-500 mb-2">Alterações</p>
+                <div className="bg-zinc-950 border border-zinc-800 rounded-lg max-h-64 overflow-y-auto font-mono text-xs leading-relaxed">
+                  {diffResult.map((l, i) => (
+                    <div
+                      key={i}
+                      className={
+                        l.type === "added"
+                          ? "bg-emerald-500/10 text-emerald-300 px-4 py-0.5"
+                          : l.type === "removed"
+                          ? "bg-red-500/10 text-red-300 px-4 py-0.5 line-through opacity-60"
+                          : "text-zinc-600 px-4 py-0.5"
+                      }
+                    >
+                      <span className="select-none mr-2 opacity-50">
+                        {l.type === "added" ? "+" : l.type === "removed" ? "−" : " "}
+                      </span>
+                      <span className="whitespace-pre-wrap">{l.line || " "}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              {/* Campo de motivo */}
+              <div>
+                <label className="text-xs text-zinc-400 mb-2 block">
+                  Motivo da alteração <span className="text-zinc-600">(opcional, mas recomendado)</span>
+                </label>
+                <input
+                  type="text"
+                  value={saveReason}
+                  onChange={(e) => setSaveReason(e.target.value)}
+                  placeholder='Ex: "Corrigido bairro Pituba → Itaigara"'
+                  className="w-full bg-zinc-800 border border-zinc-700 text-zinc-100 text-sm rounded-md px-3 py-2 focus:outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500/30"
+                  onKeyDown={(e) => { if (e.key === "Enter") confirmSave(); }}
+                  autoFocus
+                />
+              </div>
+
+              {saveError && (
+                <div className="bg-red-500/10 border border-red-500/30 text-red-400 text-xs px-3 py-2 rounded-md">{saveError}</div>
+              )}
+            </div>
+
+            <div className="flex items-center justify-end gap-2 px-5 py-4 border-t border-zinc-800">
+              <button
+                onClick={() => setShowSaveConfirm(false)}
+                disabled={saving}
+                className="text-sm text-zinc-400 hover:text-zinc-200 px-4 py-2 transition-colors"
+              >
+                Voltar
+              </button>
+              <button
+                onClick={confirmSave}
+                disabled={saving}
+                className="bg-emerald-500 hover:bg-emerald-400 disabled:opacity-50 text-black text-sm font-medium px-5 py-2 rounded-md transition-colors flex items-center gap-2"
+              >
+                {saving ? (
+                  <><span className="animate-spin inline-block w-3 h-3 border-2 border-black/30 border-t-black rounded-full" />Salvando...</>
+                ) : "Confirmar e salvar"}
+              </button>
             </div>
           </div>
         </div>

@@ -79,6 +79,18 @@ enum TicketStatus {
   REJECTED
 }
 
+enum RegressionRunStatus {
+  PENDING
+  PASSED
+  FAILED
+}
+
+enum ConvOutcome {
+  SCHEDULED
+  NOT_SCHEDULED
+  LOST
+}
+
 // ─────────────────────────────────────────────
 // Client — dados do cliente (clínica)
 // ─────────────────────────────────────────────
@@ -107,19 +119,20 @@ model Client {
   targetAudience    String?          // texto livre: público-alvo
   ageRange          String?          // ex: "40+", "18-35"
   restrictions          String?          // o que Sofia nunca pode fazer/dizer
-  mandatoryPhrases      String?          // informações que Sofia SEMPRE deve mencionar (campo "Informações importantes")
+  mandatoryPhrases      String?          // informações que Sofia SEMPRE deve mencionar
   consultationInfo      String?          // como funciona a primeira consulta / avaliação
-  schedulingRequirements String?         // dados obrigatórios para agendar (o que Sofia deve coletar)
+  schedulingRequirements String?         // dados obrigatórios para agendar
   paymentInfo           String?          // formas de pagamento
-  urgencyHandling       String?          // atende urgência odontológica? (Sim/Não)
-  urgencyProcedure      String?          // como Sofia deve proceder em casos de urgência
+  urgencyHandling       String?          // atende urgência odontológica?
+  urgencyProcedure      String?          // como Sofia deve proceder em urgências
   specialists       String?          // dentistas e especialidades (texto livre)
   certifications    String?          // certificações, prêmios ou diferenciais dos profissionais
   technologies      String?          // equipamentos e tecnologias confirmadas
   differentials     String?          // diferenciais reais da clínica
   businessHours     String?          // horários de atendimento
-  procedureType     String?          // especialidade majoritária (ex: Ortodontia, Implantes, Estética)
-  clinicPositioning String?          // posicionamento (ex: Popular, Intermediária, Premium, Boutique)
+  procedureType     String?          // especialidade majoritária
+  clinicPositioning String?          // posicionamento (ex: Popular, Intermediária, Premium)
+  minConversationsPerVersion Int     @default(10) // mínimo de conversas por versão
   status            ClientStatus     @default(ONBOARDING)
   createdAt         DateTime         @default(now())
   updatedAt         DateTime         @updatedAt
@@ -128,6 +141,10 @@ model Client {
   tickets           CorrectionTicket[]
   onboardingUploads OnboardingUpload[]
   apiUsageLogs      ApiUsageLog[]
+  regressionCases   RegressionCase[]
+  calibrations      Calibration[]
+  leadOriginTags    LeadOriginTag[]
+  conversationSamples ConversationSample[]
 }
 
 // ─────────────────────────────────────────────
@@ -139,16 +156,18 @@ model PromptVersion {
   clientId        String
   client          Client      @relation(fields: [clientId], references: [id], onDelete: Cascade)
   version         Int         // sequencial: 1, 2, 3...
-  systemPrompt    String      @db.Text // prompt técnico completo (hash-delimitado)
-  ragDocument     String?     @db.Text // base de conhecimento factual (separada)
-  narrativeManual String?     @db.Text // Prompt 2 — manual narrativo (opcional)
+  systemPrompt    String      @db.Text
+  ragDocument     String?     @db.Text
+  narrativeManual String?     @db.Text
   isActive        Boolean     @default(false)
   generatedBy     GeneratedBy @default(AI)
-  changesSummary  String?     // resumo do que mudou nessa versão
+  changesSummary  String?     // motivo da mudança (input do usuário)
+  savedBy         String?     // Clerk userId de quem salvou
   createdAt       DateTime    @default(now())
 
-  modules         PromptModule[]
-  tickets         CorrectionTicket[]
+  modules             PromptModule[]
+  tickets             CorrectionTicket[]
+  conversationSamples ConversationSample[]
 
   @@unique([clientId, version])
 }
@@ -191,6 +210,85 @@ model CorrectionTicket {
 }
 
 // ─────────────────────────────────────────────
+// RegressionCase — caso de teste de regressão
+// ─────────────────────────────────────────────
+
+model RegressionCase {
+  id        String          @id @default(cuid())
+  clientId  String
+  client    Client          @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  name      String
+  input     String          @db.Text  // mensagem de entrada enviada para a Sofia
+  criteria  String[]                  // lista de critérios esperados
+  createdAt DateTime        @default(now())
+  updatedAt DateTime        @updatedAt
+
+  runs      RegressionRun[]
+}
+
+// ─────────────────────────────────────────────
+// RegressionRun — execução de um caso de teste
+// ─────────────────────────────────────────────
+
+model RegressionRun {
+  id       String              @id @default(cuid())
+  caseId   String
+  case     RegressionCase      @relation(fields: [caseId], references: [id], onDelete: Cascade)
+  response String              @db.Text  // resposta gerada pelo Claude
+  results  Json                // { criterion: string, passed: boolean | null }[]
+  status   RegressionRunStatus @default(PENDING)
+  runAt    DateTime            @default(now())
+}
+
+// ─────────────────────────────────────────────
+// Calibration — comparação Sofia vs humano
+// ─────────────────────────────────────────────
+
+model Calibration {
+  id                String   @id @default(cuid())
+  clientId          String
+  client            Client   @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  humanConversation String   @db.Text
+  sofiaConversation String   @db.Text
+  gaps              Json     // { axis, description, promptSuggestion }[]
+  appliedToPrompt   Boolean  @default(false)
+  createdAt         DateTime @default(now())
+}
+
+// ─────────────────────────────────────────────
+// LeadOriginTag — personalização por origem do lead
+// ─────────────────────────────────────────────
+
+model LeadOriginTag {
+  id        String   @id @default(cuid())
+  clientId  String
+  client    Client   @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  tag       String               // "Anúncio Implante"
+  opening   String   @db.Text   // abertura personalizada
+  isActive  Boolean  @default(true)
+  isDefault Boolean  @default(false) // true = tag padrão (sem origem específica)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+// ─────────────────────────────────────────────
+// ConversationSample — banco de conversas reais
+// ─────────────────────────────────────────────
+
+model ConversationSample {
+  id              String        @id @default(cuid())
+  clientId        String
+  client          Client        @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  promptVersionId String
+  promptVersion   PromptVersion @relation(fields: [promptVersionId], references: [id])
+  content         String        @db.Text  // texto bruto da conversa
+  outcome         ConvOutcome?            // agendou / não agendou / perdeu
+  notes           String?                 // observação livre
+  source          String?                 // "whatsapp", "interno" etc
+  createdAt       DateTime      @default(now())
+}
+
+// ─────────────────────────────────────────────
 // ApiUsageLog — rastreamento de custo por operação
 // ─────────────────────────────────────────────
 
@@ -198,8 +296,8 @@ model ApiUsageLog {
   id           String   @id @default(cuid())
   clientId     String?
   client       Client?  @relation(fields: [clientId], references: [id], onDelete: SetNull)
-  operation    String   // "generate_prompt" | "suggest_module" | "suggest_ticket" | "import_restructure"
-  model        String   // "claude-sonnet-4-6" | "claude-haiku-4-5-20251001"
+  operation    String
+  model        String
   inputTokens  Int
   outputTokens Int
   costUsd      Float
@@ -214,8 +312,8 @@ model KnowledgeDocument {
   id        String   @id @default(cuid())
   title     String
   content   String   @db.Text
-  category  String?  // ex: "pesquisa-mercado", "boas-praticas", "comunicacao"
-  tags      String[] // ex: ["implante", "boutique", "spin"]
+  category  String?
+  tags      String[]
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 }
@@ -228,10 +326,10 @@ model PromptTemplate {
   id          String   @id @default(cuid())
   name        String
   description String?
-  content     String   @db.Text // prompt completo no formato ###MÓDULO###
+  content     String   @db.Text
   version     String   @default("v1.0")
   isActive    Boolean  @default(true)
-  tags        String[] // ex: ["ortodontia", "boutique", "popular"]
+  tags        String[]
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 }
@@ -245,7 +343,7 @@ model OnboardingUpload {
   clientId    String
   client      Client   @relation(fields: [clientId], references: [id], onDelete: Cascade)
   fileName    String
-  fileUrl     String   // URL no Supabase Storage
-  parsedData  Json     // campos extraídos do CSV
+  fileUrl     String
+  parsedData  Json
   createdAt   DateTime @default(now())
 }

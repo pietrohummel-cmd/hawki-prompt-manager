@@ -1,6 +1,11 @@
 import { auth } from "@clerk/nextjs/server";
 import { NextResponse } from "next/server";
+import { z } from "zod";
 import { prisma } from "@/lib/prisma";
+
+const patchSchema = z.object({
+  minConversationsPerVersion: z.number().int().min(1).max(100).optional(),
+});
 
 export async function GET(
   _request: Request,
@@ -24,6 +29,24 @@ export async function GET(
   if (!client) return NextResponse.json({ error: "Not found" }, { status: 404 });
 
   return NextResponse.json(client);
+}
+
+export async function PATCH(
+  request: Request,
+  { params }: { params: Promise<{ id: string }> }
+) {
+  const { userId } = await auth();
+  if (!userId) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+
+  const { id } = await params;
+  const body = await request.json();
+  const parsed = patchSchema.safeParse(body);
+  if (!parsed.success) {
+    return NextResponse.json({ error: "Dados inválidos" }, { status: 400 });
+  }
+
+  const updated = await prisma.client.update({ where: { id }, data: parsed.data });
+  return NextResponse.json(updated);
 }
 
 export async function DELETE(

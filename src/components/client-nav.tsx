@@ -27,9 +27,14 @@ const STATUS_LABELS: Record<ClientStatus, string> = {
 };
 
 const tabs = [
-  { label: "Prompt",  href: (id: string) => `/clients/${id}/prompt` },
-  { label: "Versões", href: (id: string) => `/clients/${id}/versions` },
-  { label: "Tickets", href: (id: string) => `/clients/${id}/tickets` },
+  { label: "Prompt",      href: (id: string) => `/clients/${id}/prompt` },
+  { label: "Versões",     href: (id: string) => `/clients/${id}/versions` },
+  { label: "Tickets",     href: (id: string) => `/clients/${id}/tickets` },
+  { label: "Simulação",   href: (id: string) => `/clients/${id}/simulation` },
+  { label: "Conversas",   href: (id: string) => `/clients/${id}/conversations` },
+  { label: "Regressão",   href: (id: string) => `/clients/${id}/regression` },
+  { label: "Calibração",  href: (id: string) => `/clients/${id}/calibration` },
+  { label: "Origens",     href: (id: string) => `/clients/${id}/origins` },
 ];
 
 export function ClientNav({ client }: ClientNavProps) {
@@ -99,8 +104,8 @@ export function ClientNav({ client }: ClientNavProps) {
         </div>
       </div>
 
-      {/* Tabs */}
-      <div className="flex gap-1 border-b border-[var(--surface-border)]">
+      {/* Tabs com scroll horizontal em telas menores */}
+      <div className="flex gap-0.5 border-b border-[var(--surface-border)] overflow-x-auto scrollbar-none">
         {tabs.map((tab) => {
           const href = tab.href(client.id);
           const active = pathname === href || pathname.startsWith(href);
@@ -108,7 +113,7 @@ export function ClientNav({ client }: ClientNavProps) {
             <Link
               key={tab.label}
               href={href}
-              className={`px-4 py-2 text-sm font-medium transition-colors border-b-2 -mb-px ${
+              className={`px-4 py-2 text-sm font-medium transition-colors border-b-2 -mb-px whitespace-nowrap ${
                 active
                   ? "border-[var(--accent)] text-[var(--accent-text)]"
                   : "border-transparent text-[var(--text-muted)] hover:text-[var(--text-secondary)]"

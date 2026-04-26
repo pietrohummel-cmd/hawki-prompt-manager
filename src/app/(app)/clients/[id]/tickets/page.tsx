@@ -373,14 +373,12 @@ export default function TicketsPage() {
                           {applying === ticket.id ? "Aplicando..." : "Aplicar correção"}
                         </button>
                       )}
-                      {ticket.status !== "REJECTED" && (
-                        <button
-                          onClick={() => handleReject(ticket.id)}
-                          className="text-xs text-zinc-500 hover:text-red-400 transition-colors px-3 py-2"
-                        >
-                          Rejeitar
-                        </button>
-                      )}
+                      <button
+                        onClick={() => handleReject(ticket.id)}
+                        className="text-xs text-zinc-500 hover:text-red-400 transition-colors px-3 py-2"
+                      >
+                        Rejeitar
+                      </button>
                     </div>
                   )}
 
