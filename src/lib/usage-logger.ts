@@ -23,7 +23,9 @@ export type OperationType =
   | "generate_prompt"
   | "suggest_module"
   | "suggest_ticket"
-  | "import_restructure";
+  | "import_restructure"
+  | "identify_module"
+  | "generate_kb";
 
 export interface UsageData {
   input_tokens: number;

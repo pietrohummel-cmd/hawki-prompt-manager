@@ -3,15 +3,10 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { prisma } from "@/lib/prisma";
 import { suggestModuleContent } from "@/lib/module-editor";
+import { MODULE_ORDER } from "@/lib/prompt-constants";
 
 const schema = z.object({
-  moduleKey: z.enum([
-    "IDENTITY", "ABSOLUTE_RULES", "INJECTION_PROTECTION", "CONVERSATION_STATE",
-    "CONVERSATION_RESUME", "PRESENTATION", "COMMUNICATION_STYLE", "HUMAN_BEHAVIOR",
-    "ACTIVE_LISTENING", "ATTENDANCE_STAGES", "QUALIFICATION", "SLOT_OFFER",
-    "COMMITMENT_CONFIRMATION", "OPENING", "FINAL_OBJECTIVE", "AUDIO_RULES",
-    "STATUS_RULES", "HANDOFF",
-  ] as const),
+  moduleKey: z.enum(MODULE_ORDER as [string, ...string[]]),
   currentContent: z.string().min(1),
 });
 
@@ -36,12 +31,13 @@ export async function POST(
   }
 
   const { moduleKey, currentContent } = parsed.data;
+  const typedModuleKey = moduleKey as import("@/generated/prisma").ModuleKey;
 
   const client = await prisma.client.findUnique({ where: { id } });
   if (!client) return NextResponse.json({ error: "Cliente não encontrado" }, { status: 404 });
 
   try {
-    const suggestion = await suggestModuleContent(client, moduleKey, currentContent);
+    const suggestion = await suggestModuleContent(client, typedModuleKey, currentContent);
     return NextResponse.json({ suggestion });
   } catch (err) {
     console.error("[POST modules/suggest]", err);

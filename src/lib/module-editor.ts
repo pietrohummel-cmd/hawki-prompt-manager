@@ -2,29 +2,22 @@ import Anthropic from "@anthropic-ai/sdk";
 import type { Client, ModuleKey } from "@/generated/prisma";
 import { MODULE_LABELS } from "@/lib/prompt-constants";
 import { logUsage } from "@/lib/usage-logger";
+import { SOFIA_GUIDELINES_CONDENSED } from "@/lib/sofia-guidelines";
 
 const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 
 // Descrição funcional de cada módulo — guia a IA na sugestão de melhoria
 const MODULE_DESCRIPTIONS: Record<ModuleKey, string> = {
-  IDENTITY: "Define quem é a assistente, seu nome, para qual clínica trabalha e sua função principal.",
-  ABSOLUTE_RULES: "Regras invioláveis que a assistente nunca pode quebrar (ex: nunca dar diagnóstico, nunca inventar horários).",
-  INJECTION_PROTECTION: "Proteção contra tentativas de manipulação ou injeção de prompt malicioso por usuários.",
-  CONVERSATION_STATE: "Como a assistente gerencia o contexto da conversa e lembra informações do paciente.",
-  CONVERSATION_RESUME: "Como retomar conversas antigas ou interrompidas, reconhecendo pacientes que já conversaram antes.",
-  PRESENTATION: "A mensagem de apresentação inicial ao receber uma nova mensagem.",
-  COMMUNICATION_STYLE: "Tom de voz, formalidade, uso de emojis, comprimento das mensagens e estilo geral.",
-  HUMAN_BEHAVIOR: "Comportamentos que tornam a assistente mais humana (pausas, variações de resposta, erros tipográficos propositais, etc).",
-  ACTIVE_LISTENING: "Técnicas de escuta ativa: como a assistente valida o que o paciente diz antes de responder.",
-  ATTENDANCE_STAGES: "As etapas do fluxo de atendimento que a assistente deve seguir sequencialmente.",
-  QUALIFICATION: "Como qualificar leads/pacientes usando perguntas SPIN para entender necessidades e urgência.",
-  SLOT_OFFER: "Como oferecer horários disponíveis para agendamento de forma natural.",
-  COMMITMENT_CONFIRMATION: "Como confirmar o agendamento e garantir o compromisso do paciente.",
-  OPENING: "A abertura padrão da conversa — como a assistente começa cada atendimento.",
-  FINAL_OBJECTIVE: "O objetivo final do fluxo: o que a assistente deve ter alcançado ao final da conversa.",
-  AUDIO_RULES: "Como a assistente lida com mensagens de áudio enviadas pelo paciente.",
-  STATUS_RULES: "Regras sobre quando usar status/disponibilidade (ex: não lido, digitando).",
-  HANDOFF: "Quando e como passar a conversa para um atendente humano.",
+  IDENTITY: "Define quem é a assistente: nome, clínica, cidade e função. Máx. 60 palavras.",
+  INJECTION_PROTECTION: "1 instrução com script exato para responder a tentativas de manipulação de prompt. Máx. 60 palavras.",
+  TONE_AND_STYLE: "Tom verificável (linhas por mensagem, emojis, bullets) + 3 comportamentos anti-robô + 2 regras de escuta: parafrasear antes de responder e nunca pedir dados já fornecidos. Máx. 120 palavras.",
+  OPENING: "Mensagem padrão de primeiro contato (1 linha) + 4 variações por período (manhã/tarde/noite/urgência), 1 linha cada. Máx. 80 palavras.",
+  ATTENDANCE_FLOW: "5 passos numerados do fluxo (1 linha cada) + 1 frase sobre retomada de conversa. Máx. 100 palavras.",
+  QUALIFICATION: "Perguntas SPIN por cenário (dor/estética/prevenção/tratamento) + tabela de especialistas com disponibilidade. Máx. 200 palavras.",
+  OBJECTION_HANDLING: "3 scripts de objeção diretos: medo/ansiedade, falta de tempo, indecisão. Sem cabeçalho descritivo. Máx. 100 palavras.",
+  FEW_SHOT_EXAMPLES: "2 exemplos de conversa completa no formato [PACIENTE]: / [Nome]: — (1) agendamento completo 8–10 turnos com dados reais da clínica, (2) urgência 3 turnos com telefone imediato.",
+  AUDIO_AND_HANDOFF: "4 regras de áudio completas (incluindo instrução para áudio incompreensível) + quando/como passar para humano. Máx. 80 palavras.",
+  ABSOLUTE_RULES: "EXATAMENTE 5 regras invioláveis, cada uma começando com NUNCA ou SEMPRE. Fica sempre por último.",
 };
 
 function buildMinimalContext(client: Client): string {
@@ -57,6 +50,8 @@ export async function suggestModuleContent(
 
   const prompt = `Você é um especialista em criar prompts para assistentes de IA de clínicas odontológicas brasileiras.
 
+${SOFIA_GUIDELINES_CONDENSED}
+
 CONTEXTO MÍNIMO DO CLIENTE:
 ${context}
 
@@ -66,8 +61,8 @@ FUNÇÃO DESTE MÓDULO: ${description}
 CONTEÚDO ATUAL:
 ${currentContent}
 
-Sugira uma versão melhorada deste módulo. Mantenha todas as informações corretas da clínica, melhore a clareza, naturalidade e eficácia.
-Responda APENAS com o conteúdo do módulo — sem comentários, sem cabeçalho, sem ###MÓDULO###.`;
+Sugira uma versão melhorada deste módulo. Siga rigorosamente as diretrizes acima — evite antipadrões, use tom operacional verificável, regras com gatilho claro.
+Mantenha todas as informações corretas da clínica. Responda APENAS com o conteúdo do módulo — sem comentários, sem cabeçalho, sem ###MÓDULO###.`;
 
   // Haiku: suficiente para sugestões focadas, ~25x mais barato que Sonnet
   const message = await anthropic.messages.create({

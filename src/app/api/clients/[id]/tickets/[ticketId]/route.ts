@@ -2,11 +2,13 @@ import { auth } from "@clerk/nextjs/server";
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { prisma } from "@/lib/prisma";
+import { MODULE_ORDER } from "@/lib/prompt-constants";
 
 const patchSchema = z.object({
   status: z.enum(["OPEN", "SUGGESTED", "APPROVED", "APPLIED", "REJECTED"]).optional(),
   finalCorrection: z.string().optional(),
   aiSuggestion: z.string().optional(),
+  affectedModule: z.enum(MODULE_ORDER as [string, ...string[]]).nullable().optional(),
 });
 
 /**
@@ -38,6 +40,7 @@ export async function PATCH(
     where: { id: ticketId },
     data: {
       ...parsed.data,
+      affectedModule: parsed.data.affectedModule as import("@/generated/prisma").ModuleKey | null | undefined,
       resolvedAt:
         parsed.data.status === "APPLIED" || parsed.data.status === "REJECTED"
           ? new Date()

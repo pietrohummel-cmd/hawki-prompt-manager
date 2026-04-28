@@ -34,6 +34,8 @@ const tabs = [
   { label: "Conversas",   href: (id: string) => `/clients/${id}/conversations` },
   { label: "Regressão",   href: (id: string) => `/clients/${id}/regression` },
   { label: "Calibração",  href: (id: string) => `/clients/${id}/calibration` },
+  { label: "Copiloto",    href: (id: string) => `/clients/${id}/copilot` },
+  { label: "KB",          href: (id: string) => `/clients/${id}/knowledge` },
   { label: "Origens",     href: (id: string) => `/clients/${id}/origins` },
 ];
 

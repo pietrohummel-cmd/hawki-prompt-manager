@@ -282,7 +282,11 @@ export default function PromptPage() {
 
       {activeVersion && !generating && (
         <div className="space-y-2">
-          {sortedModules.map((mod, i) => (
+          <PromptHealthBar modules={activeVersion.modules} />
+
+          {sortedModules.map((mod, i) => {
+            const truncated = mod.content.length > 10 && !/[.!?]$/.test(mod.content.trimEnd());
+            return (
             <div key={mod.moduleKey} className="bg-zinc-900 border border-zinc-800 rounded-lg overflow-hidden">
               <div className="flex items-center justify-between px-4 py-3">
                 <button
@@ -292,6 +296,11 @@ export default function PromptPage() {
                   <span className="text-xs text-zinc-600 w-5 text-right">{i + 1}</span>
                   <span className="text-sm font-medium text-zinc-200">{MODULE_LABELS[mod.moduleKey]}</span>
                   <span className="text-xs text-zinc-600 font-mono">{mod.moduleKey}</span>
+                  {truncated && (
+                    <span className="text-xs text-yellow-500/80 bg-yellow-500/10 px-1.5 py-0.5 rounded" title="Módulo pode estar truncado — última frase sem pontuação final">
+                      ⚠ truncado
+                    </span>
+                  )}
                 </button>
                 <div className="flex items-center gap-3 ml-4">
                   <button
@@ -314,21 +323,10 @@ export default function PromptPage() {
                 </div>
               )}
             </div>
-          ))}
+            );
+          })}
 
-          <details className="mt-6">
-            <summary className="text-xs text-zinc-500 cursor-pointer hover:text-zinc-400 py-2">
-              Ver prompt completo (texto bruto)
-            </summary>
-            <div className="mt-3 bg-zinc-900 border border-zinc-800 rounded-lg p-4">
-              <pre className="text-xs text-zinc-400 whitespace-pre-wrap font-mono leading-relaxed">
-                {activeVersion.modules
-                  .sort((a, b) => MODULE_ORDER.indexOf(a.moduleKey) - MODULE_ORDER.indexOf(b.moduleKey))
-                  .map((m) => `###MÓDULO:${m.moduleKey}###\n${m.content}`)
-                  .join("\n\n")}
-              </pre>
-            </div>
-          </details>
+          <FullPromptBlock modules={activeVersion.modules} />
         </div>
       )}
 
@@ -534,5 +532,111 @@ export default function PromptPage() {
         </div>
       )}
     </>
+  );
+}
+
+function PromptHealthBar({ modules }: { modules: PromptModule[] }) {
+  const allText = modules.map((m) => m.content).join(" ");
+  const wordCount = allText.trim() ? allText.trim().split(/\s+/).length : 0;
+
+  const absoluteRulesModule = modules.find((m) => m.moduleKey === "ABSOLUTE_RULES");
+  const absoluteRulesCount = absoluteRulesModule
+    ? (absoluteRulesModule.content.match(/\b(NUNCA|SEMPRE)\b/g) ?? []).length
+    : 0;
+
+  const absoluteRulesPos = MODULE_ORDER.indexOf("ABSOLUTE_RULES");
+  const absoluteRulesAtEnd = absoluteRulesPos >= MODULE_ORDER.length - 3;
+
+  const wordColor =
+    wordCount === 0 ? "text-zinc-500" :
+    wordCount <= 1200 ? "text-emerald-400" :
+    wordCount <= 2000 ? "text-yellow-400" :
+    "text-red-400";
+
+  const wordLabel =
+    wordCount <= 1200 ? "ótimo" :
+    wordCount <= 2000 ? "longo" :
+    "muito longo";
+
+  const rulesColor = absoluteRulesCount === 0 ? "text-zinc-500" : absoluteRulesCount <= 5 ? "text-emerald-400" : "text-red-400";
+
+  if (wordCount === 0) return null;
+
+  return (
+    <div className="flex items-center gap-3 flex-wrap px-1 pb-1">
+      <span
+        className={`flex items-center gap-1.5 text-xs px-2.5 py-1 rounded-full bg-zinc-800/60 ${wordColor}`}
+        title="Total de palavras no prompt. Sweet spot da plataforma Hawki: 700–1.200 palavras."
+      >
+        {wordCount.toLocaleString("pt-BR")} palavras
+        <span className="opacity-60">· {wordLabel}</span>
+      </span>
+
+      {absoluteRulesCount > 0 && (
+        <span
+          className={`flex items-center gap-1.5 text-xs px-2.5 py-1 rounded-full bg-zinc-800/60 ${rulesColor}`}
+          title="Quantidade de regras NUNCA/SEMPRE no módulo ABSOLUTE_RULES. Máximo recomendado: 5."
+        >
+          {absoluteRulesCount} regra{absoluteRulesCount !== 1 ? "s" : ""} absolutas
+          {absoluteRulesCount > 5 && <span className="opacity-70">· reduzir para ≤5</span>}
+        </span>
+      )}
+
+      {!absoluteRulesAtEnd && (
+        <span
+          className="flex items-center gap-1.5 text-xs px-2.5 py-1 rounded-full bg-zinc-800/60 text-yellow-400"
+          title="ABSOLUTE_RULES não está no final do prompt. Mova para o fim para aproveitar o efeito de recência."
+        >
+          ⚠ regras absolutas fora do fim
+        </span>
+      )}
+    </div>
+  );
+}
+
+function FullPromptBlock({ modules }: { modules: PromptModule[] }) {
+  const [copied, setCopied] = useState(false);
+
+  const text = modules
+    .slice()
+    .sort((a, b) => MODULE_ORDER.indexOf(a.moduleKey) - MODULE_ORDER.indexOf(b.moduleKey))
+    .map((m) => `###MÓDULO:${m.moduleKey}###\n${m.content}`)
+    .join("\n\n");
+
+  function handleCopy() {
+    navigator.clipboard.writeText(text);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  }
+
+  return (
+    <details className="mt-6">
+      <summary className="text-xs text-zinc-500 cursor-pointer hover:text-zinc-400 py-2">
+        Ver prompt completo (texto bruto)
+      </summary>
+      <div className="mt-3 bg-zinc-900 border border-zinc-800 rounded-lg overflow-hidden">
+        <div className="flex items-center justify-end px-4 py-2 border-b border-zinc-800">
+          <button
+            onClick={handleCopy}
+            className="flex items-center gap-1.5 text-xs text-zinc-500 hover:text-zinc-300 transition-colors"
+          >
+            {copied ? (
+              <>
+                <svg className="h-3.5 w-3.5 text-emerald-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" /></svg>
+                <span className="text-emerald-400">Copiado</span>
+              </>
+            ) : (
+              <>
+                <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><rect x="9" y="9" width="13" height="13" rx="2" ry="2" /><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1" /></svg>
+                Copiar
+              </>
+            )}
+          </button>
+        </div>
+        <pre className="text-xs text-zinc-400 whitespace-pre-wrap font-mono leading-relaxed p-4">
+          {text}
+        </pre>
+      </div>
+    </details>
   );
 }

@@ -2,7 +2,7 @@
 
 import { useEffect, useState, useCallback } from "react";
 import { useParams } from "next/navigation";
-import { MODULE_LABELS } from "@/lib/prompt-constants";
+import { MODULE_LABELS, MODULE_ORDER } from "@/lib/prompt-constants";
 import type { ModuleKey, TicketPriority, TicketStatus } from "@/generated/prisma";
 
 interface Ticket {
@@ -46,13 +46,7 @@ const STATUS_COLORS: Record<TicketStatus, string> = {
   REJECTED: "bg-zinc-500/10 text-zinc-500",
 };
 
-const MODULE_KEYS: ModuleKey[] = [
-  "IDENTITY", "ABSOLUTE_RULES", "INJECTION_PROTECTION", "CONVERSATION_STATE",
-  "CONVERSATION_RESUME", "PRESENTATION", "COMMUNICATION_STYLE", "HUMAN_BEHAVIOR",
-  "ACTIVE_LISTENING", "ATTENDANCE_STAGES", "QUALIFICATION", "SLOT_OFFER",
-  "COMMITMENT_CONFIRMATION", "OPENING", "FINAL_OBJECTIVE", "AUDIO_RULES",
-  "STATUS_RULES", "HANDOFF",
-];
+const MODULE_KEYS = MODULE_ORDER;
 
 function formatDate(dateStr: string) {
   return new Date(dateStr).toLocaleString("pt-BR", {
@@ -85,6 +79,24 @@ export default function TicketsPage() {
   const [expandedTicket, setExpandedTicket] = useState<string | null>(null);
   const [editingSuggestion, setEditingSuggestion] = useState<Record<string, string>>({});
 
+  // IA: identificação de módulo
+  const [identifyingModule, setIdentifyingModule] = useState(false);
+  const [identifyReasoning, setIdentifyReasoning] = useState<string | null>(null);
+
+  // Aplicar em lote
+  const [applyingBatch, setApplyingBatch] = useState(false);
+  const [batchResult, setBatchResult] = useState<string | null>(null);
+
+  // Definir módulo inline
+  const [inlineModule, setInlineModule] = useState<Record<string, ModuleKey | "">>({});
+  const [savingModule, setSavingModule] = useState<string | null>(null);
+  const [identifyingModuleInline, setIdentifyingModuleInline] = useState<string | null>(null);
+  const [inlineModuleReasoning, setInlineModuleReasoning] = useState<Record<string, string>>({});
+
+  const batchEligible = tickets.filter(
+    (t) => ["OPEN", "SUGGESTED"].includes(t.status) && t.affectedModule && t.aiSuggestion
+  );
+
   const load = useCallback(async () => {
     try {
       const res = await fetch(`/api/clients/${id}/tickets`);
@@ -98,6 +110,27 @@ export default function TicketsPage() {
   }, [id]);
 
   useEffect(() => { load(); }, [load]);
+
+  async function handleIdentifyModule() {
+    if (!formDesc.trim()) return;
+    setIdentifyingModule(true);
+    setIdentifyReasoning(null);
+    try {
+      const res = await fetch(`/api/clients/${id}/tickets/identify-module`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ description: formDesc, transcript: formTranscript || undefined }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error ?? "Erro ao identificar módulo");
+      setFormModule(data.moduleKey);
+      setIdentifyReasoning(data.reasoning);
+    } catch (err) {
+      setCreateError(err instanceof Error ? err.message : "Erro ao identificar módulo");
+    } finally {
+      setIdentifyingModule(false);
+    }
+  }
 
   async function handleCreate() {
     if (!formDesc.trim()) return;
@@ -117,6 +150,7 @@ export default function TicketsPage() {
       const data = await res.json();
       if (!res.ok) throw new Error(data.error ?? "Erro ao criar ticket");
       setFormDesc(""); setFormTranscript(""); setFormModule(""); setFormPriority("NORMAL");
+      setIdentifyReasoning(null);
       setShowForm(false);
       await load();
     } catch (err) {
@@ -163,6 +197,22 @@ export default function TicketsPage() {
     }
   }
 
+  async function handleApplyBatch() {
+    setApplyingBatch(true);
+    setBatchResult(null);
+    try {
+      const res = await fetch(`/api/clients/${id}/tickets/apply-batch`, { method: "POST" });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error ?? "Erro ao aplicar em lote");
+      setBatchResult(`✓ ${data.appliedCount} ticket${data.appliedCount !== 1 ? "s" : ""} aplicado${data.appliedCount !== 1 ? "s" : ""} — versão v${data.newVersion} criada`);
+      await load();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Erro ao aplicar em lote");
+    } finally {
+      setApplyingBatch(false);
+    }
+  }
+
   async function handleReject(ticketId: string) {
     try {
       await fetch(`/api/clients/${id}/tickets/${ticketId}`, {
@@ -176,23 +226,84 @@ export default function TicketsPage() {
     }
   }
 
+  async function handleIdentifyModuleInline(ticket: Ticket) {
+    setIdentifyingModuleInline(ticket.id);
+    setInlineModuleReasoning((prev) => ({ ...prev, [ticket.id]: "" }));
+    try {
+      const res = await fetch(`/api/clients/${id}/tickets/identify-module`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          description: ticket.description,
+          transcript: ticket.conversationTranscript ?? undefined,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error ?? "Erro ao identificar módulo");
+      setInlineModule((prev) => ({ ...prev, [ticket.id]: data.moduleKey }));
+      setInlineModuleReasoning((prev) => ({ ...prev, [ticket.id]: data.reasoning ?? "" }));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Erro ao identificar módulo");
+    } finally {
+      setIdentifyingModuleInline(null);
+    }
+  }
+
+  async function handleSetModule(ticketId: string) {
+    const moduleKey = inlineModule[ticketId];
+    if (!moduleKey) return;
+    setSavingModule(ticketId);
+    try {
+      const res = await fetch(`/api/clients/${id}/tickets/${ticketId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ affectedModule: moduleKey }),
+      });
+      const data = await res.json();
+      if (res.ok) {
+        setTickets((prev) => prev.map((t) => t.id === ticketId ? { ...t, affectedModule: data.affectedModule } : t));
+      }
+    } catch {
+      setError("Erro ao definir módulo");
+    } finally {
+      setSavingModule(null);
+    }
+  }
+
   if (loading) return <div className="text-zinc-500 text-sm py-8 text-center">Carregando tickets...</div>;
 
   return (
     <div>
-      <div className="flex items-center justify-between mb-6">
+      <div className="flex items-center justify-between mb-4">
         <p className="text-zinc-500 text-sm">
           {tickets.length > 0
             ? `${tickets.filter((t) => t.status === "OPEN" || t.status === "SUGGESTED").length} aberto(s) · ${tickets.length} total`
             : "Nenhum ticket"}
         </p>
-        <button
-          onClick={() => { setShowForm(!showForm); setCreateError(null); }}
-          className="text-sm bg-zinc-800 hover:bg-zinc-700 text-zinc-200 px-4 py-2 rounded-md transition-colors"
-        >
-          {showForm ? "Cancelar" : "+ Novo ticket"}
-        </button>
+        <div className="flex items-center gap-2">
+          {batchEligible.length >= 2 && (
+            <button
+              onClick={handleApplyBatch}
+              disabled={applyingBatch}
+              className="text-sm bg-emerald-600/20 hover:bg-emerald-600/30 text-emerald-400 border border-emerald-600/30 px-4 py-2 rounded-md transition-colors disabled:opacity-50"
+            >
+              {applyingBatch ? "Aplicando..." : `Aplicar todos (${batchEligible.length})`}
+            </button>
+          )}
+          <button
+            onClick={() => { setShowForm(!showForm); setCreateError(null); setIdentifyReasoning(null); }}
+            className="text-sm bg-zinc-800 hover:bg-zinc-700 text-zinc-200 px-4 py-2 rounded-md transition-colors"
+          >
+            {showForm ? "Cancelar" : "+ Novo ticket"}
+          </button>
+        </div>
       </div>
+
+      {batchResult && (
+        <div className="bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 text-xs px-4 py-3 rounded-lg mb-4">
+          {batchResult}
+        </div>
+      )}
 
       {error && (
         <div className="bg-red-500/10 border border-red-500/30 text-red-400 text-xs px-4 py-3 rounded-lg mb-4">
@@ -219,16 +330,32 @@ export default function TicketsPage() {
           <div className="grid grid-cols-2 gap-4">
             <div>
               <label className="text-xs text-zinc-400 mb-1.5 block">Módulo afetado</label>
-              <select
-                value={formModule}
-                onChange={(e) => setFormModule(e.target.value as ModuleKey | "")}
-                className="w-full bg-zinc-800 border border-zinc-700 text-zinc-100 text-sm rounded-md px-3 py-2 focus:outline-none focus:border-emerald-500"
-              >
-                <option value="">Selecione (opcional)</option>
-                {MODULE_KEYS.map((key) => (
-                  <option key={key} value={key}>{MODULE_LABELS[key]}</option>
-                ))}
-              </select>
+              <div className="flex gap-2">
+                <select
+                  value={formModule}
+                  onChange={(e) => { setFormModule(e.target.value as ModuleKey | ""); setIdentifyReasoning(null); }}
+                  className="flex-1 bg-zinc-800 border border-zinc-700 text-zinc-100 text-sm rounded-md px-3 py-2 focus:outline-none focus:border-emerald-500"
+                >
+                  <option value="">Selecione (opcional)</option>
+                  {MODULE_KEYS.map((key) => (
+                    <option key={key} value={key}>{MODULE_LABELS[key]}</option>
+                  ))}
+                </select>
+                <button
+                  type="button"
+                  onClick={handleIdentifyModule}
+                  disabled={identifyingModule || !formDesc.trim()}
+                  title="Identificar módulo com IA"
+                  className="shrink-0 flex items-center gap-1.5 text-xs bg-zinc-700 hover:bg-zinc-600 disabled:opacity-40 text-zinc-300 px-3 py-2 rounded-md transition-colors whitespace-nowrap"
+                >
+                  {identifyingModule ? (
+                    <span className="animate-spin inline-block w-3 h-3 border-2 border-zinc-500 border-t-white rounded-full" />
+                  ) : "✦ IA"}
+                </button>
+              </div>
+              {identifyReasoning && (
+                <p className="text-xs text-emerald-400 mt-1.5">{identifyReasoning}</p>
+              )}
             </div>
             <div>
               <label className="text-xs text-zinc-400 mb-1.5 block">Prioridade</label>
@@ -284,7 +411,8 @@ export default function TicketsPage() {
           const expanded = expandedTicket === ticket.id;
           const suggestionContent = editingSuggestion[ticket.id] ?? ticket.aiSuggestion ?? "";
           const canSuggest = ticket.affectedModule && (ticket.status === "OPEN" || ticket.status === "SUGGESTED");
-          const canApply = (ticket.status === "SUGGESTED" || ticket.status === "APPROVED") && suggestionContent;
+          const canApply = ["OPEN", "SUGGESTED", "APPROVED"].includes(ticket.status) && !!suggestionContent && !!ticket.affectedModule;
+          const canSetModule = !ticket.affectedModule && (ticket.status === "OPEN" || ticket.status === "SUGGESTED");
 
           return (
             <div
@@ -361,8 +489,41 @@ export default function TicketsPage() {
                           )}
                         </button>
                       )}
-                      {!ticket.affectedModule && ticket.status === "OPEN" && (
-                        <p className="text-xs text-zinc-600">Defina o módulo afetado para usar sugestão de IA.</p>
+                      {canSetModule && (
+                        <div className="space-y-1.5">
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <select
+                              value={inlineModule[ticket.id] ?? ""}
+                              onChange={(e) => setInlineModule((prev) => ({ ...prev, [ticket.id]: e.target.value as ModuleKey | "" }))}
+                              className="bg-zinc-800 border border-zinc-700 text-zinc-200 text-xs rounded-md px-2 py-1.5 focus:outline-none focus:border-emerald-500"
+                            >
+                              <option value="">Selecionar módulo...</option>
+                              {MODULE_KEYS.map((key) => (
+                                <option key={key} value={key}>{MODULE_LABELS[key]}</option>
+                              ))}
+                            </select>
+                            <button
+                              onClick={() => handleIdentifyModuleInline(ticket)}
+                              disabled={identifyingModuleInline === ticket.id}
+                              title="Identificar módulo com IA"
+                              className="flex items-center gap-1.5 text-xs bg-zinc-700 hover:bg-zinc-600 disabled:opacity-40 text-zinc-300 px-3 py-1.5 rounded-md transition-colors whitespace-nowrap"
+                            >
+                              {identifyingModuleInline === ticket.id ? (
+                                <span className="animate-spin inline-block w-3 h-3 border-2 border-zinc-500 border-t-white rounded-full" />
+                              ) : "✦ IA"}
+                            </button>
+                            <button
+                              onClick={() => handleSetModule(ticket.id)}
+                              disabled={!inlineModule[ticket.id] || savingModule === ticket.id}
+                              className="text-xs bg-zinc-700 hover:bg-zinc-600 disabled:opacity-40 text-zinc-200 px-3 py-1.5 rounded-md transition-colors"
+                            >
+                              {savingModule === ticket.id ? "Salvando..." : "Definir módulo"}
+                            </button>
+                          </div>
+                          {inlineModuleReasoning[ticket.id] && (
+                            <p className="text-xs text-emerald-400">{inlineModuleReasoning[ticket.id]}</p>
+                          )}
+                        </div>
                       )}
                       {canApply && (
                         <button

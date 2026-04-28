@@ -6,13 +6,7 @@ import { MODULE_ORDER } from "@/lib/prompt-constants";
 import type { ModuleKey } from "@/generated/prisma";
 
 const schema = z.object({
-  moduleKey: z.enum([
-    "IDENTITY", "ABSOLUTE_RULES", "INJECTION_PROTECTION", "CONVERSATION_STATE",
-    "CONVERSATION_RESUME", "PRESENTATION", "COMMUNICATION_STYLE", "HUMAN_BEHAVIOR",
-    "ACTIVE_LISTENING", "ATTENDANCE_STAGES", "QUALIFICATION", "SLOT_OFFER",
-    "COMMITMENT_CONFIRMATION", "OPENING", "FINAL_OBJECTIVE", "AUDIO_RULES",
-    "STATUS_RULES", "HANDOFF",
-  ] as const),
+  moduleKey: z.enum(MODULE_ORDER as [string, ...string[]]),
   content: z.string().min(1, "Conteúdo não pode ser vazio"),
   changesSummary: z.string().optional(),
   savedBy: z.string().optional(),

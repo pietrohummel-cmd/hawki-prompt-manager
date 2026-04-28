@@ -33,12 +33,22 @@ export async function POST(
       data: { isActive: false },
     });
 
+    // Busca artigos de KB ativos para popular ragDocument
+    const kbArticles = await prisma.clientKnowledgeArticle.findMany({
+      where: { clientId: id, isActive: true },
+      orderBy: { createdAt: "asc" },
+    });
+    const ragDocument = kbArticles.length > 0
+      ? kbArticles.map((a) => `### ${a.title}\n${a.content}`).join("\n\n")
+      : null;
+
     // Cria nova versão com todos os módulos
     const version = await prisma.promptVersion.create({
       data: {
         clientId: id,
         version: nextVersion,
         systemPrompt,
+        ragDocument,
         isActive: true,
         generatedBy: "AI",
         modules: {

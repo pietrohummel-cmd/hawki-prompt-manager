@@ -25,7 +25,8 @@ type Client = {
   status: ClientStatus;
   procedureType: string | null;
   clinicPositioning: string | null;
-  _count: { tickets: number; promptVersions: number };
+  _count: { promptVersions: number };
+  tickets: { priority: string }[];
 };
 
 const ALL_STATUSES: ClientStatus[] = ["ACTIVE", "ONBOARDING", "ARCHIVED"];
@@ -119,11 +120,18 @@ export function ClientsListClient({ clients }: { clients: Client[] }) {
                 <span className="text-xs text-[var(--text-muted)]">
                   {client._count.promptVersions} versã{client._count.promptVersions !== 1 ? "ões" : "o"}
                 </span>
-                {client._count.tickets > 0 && (
-                  <span className="text-xs bg-red-500/10 text-red-400 px-2 py-0.5 rounded-full">
-                    {client._count.tickets} ticket{client._count.tickets !== 1 ? "s" : ""}
-                  </span>
-                )}
+                {client.tickets.length > 0 && (() => {
+                  const hasCritical = client.tickets.some((t) => t.priority === "CRITICAL");
+                  return (
+                    <span className={`text-xs px-2 py-0.5 rounded-full ${
+                      hasCritical
+                        ? "bg-red-500/10 text-red-400"
+                        : "bg-amber-500/10 text-amber-400"
+                    }`}>
+                      {client.tickets.length} ticket{client.tickets.length !== 1 ? "s" : ""}
+                    </span>
+                  );
+                })()}
                 <span className={`text-xs px-2 py-0.5 rounded-full ${STATUS_COLORS[client.status]}`}>
                   {STATUS_LABELS[client.status]}
                 </span>

@@ -2,19 +2,16 @@ import { auth } from "@clerk/nextjs/server";
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { prisma } from "@/lib/prisma";
+import { MODULE_ORDER } from "@/lib/prompt-constants";
 
 const createTicketSchema = z.object({
   description: z.string().min(1, "Descrição é obrigatória"),
-  conversationTranscript: z.string().optional(),
+  conversationTranscript: z.string().optional().nullable(),
   affectedModule: z
-    .enum([
-      "IDENTITY", "ABSOLUTE_RULES", "INJECTION_PROTECTION", "CONVERSATION_STATE",
-      "CONVERSATION_RESUME", "PRESENTATION", "COMMUNICATION_STYLE", "HUMAN_BEHAVIOR",
-      "ACTIVE_LISTENING", "ATTENDANCE_STAGES", "QUALIFICATION", "SLOT_OFFER",
-      "COMMITMENT_CONFIRMATION", "OPENING", "FINAL_OBJECTIVE", "AUDIO_RULES",
-      "STATUS_RULES", "HANDOFF",
-    ] as const)
-    .optional(),
+    .enum(MODULE_ORDER as [string, ...string[]])
+    .optional()
+    .nullable(),
+  aiSuggestion: z.string().optional().nullable(),
   priority: z.enum(["CRITICAL", "NORMAL", "IMPROVEMENT"]).default("NORMAL"),
 });
 
@@ -76,8 +73,11 @@ export async function POST(
       clientId: id,
       promptVersionId: activeVersion.id,
       description: parsed.data.description,
-      conversationTranscript: parsed.data.conversationTranscript,
-      affectedModule: parsed.data.affectedModule,
+      conversationTranscript: parsed.data.conversationTranscript ?? null,
+      affectedModule: (parsed.data.affectedModule ?? null) as import("@/generated/prisma").ModuleKey | null,
+      aiSuggestion: parsed.data.aiSuggestion ?? null,
+      // Se já vem com sugestão da IA (ex: criado via calibração), vai direto para SUGGESTED
+      status: parsed.data.aiSuggestion ? "SUGGESTED" : "OPEN",
       priority: parsed.data.priority,
     },
     include: { promptVersion: { select: { version: true } } },
