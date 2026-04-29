@@ -77,6 +77,8 @@ Anotar o número da versão ativa do prompt de teste. Todos os resultados dessa 
 
 ## Fase 1 — Corrigir Bug Silencioso: `restructurePromptToModules`
 
+> ⚠️ Esta fase deve ser atualizada em lockstep com a Fase 2: quando `TOOLS` for adicionado ao schema, esta função deve distribuir conteúdo de tools em 11 módulos (não 10). Executar as duas fases no mesmo PR.
+
 **Arquivo:** `src/lib/generate-prompt.ts`
 **Função:** `restructurePromptToModules` (linha ~120)
 
@@ -104,12 +106,16 @@ O prompt de instrução dentro da função deve:
 ```bash
 # Após a mudança:
 # 1. Importar um prompt .txt existente na aba Prompt → Importar
-# 2. Verificar que todos os 10 módulos foram populados
+# 2. Se TOOLS já estiver no schema: verificar que todos os 11 módulos foram populados
+#    Se TOOLS ainda não estiver: verificar os 10 módulos atuais
 # 3. Nenhum módulo deve aparecer vazio se o texto original tinha conteúdo equivalente
+# 4. Cliente com schedulingSystem configurado: TOOLS deve ter conteúdo após importação
+# 5. Importação deve falhar com mensagem clara se módulo TOOLS não puder ser derivado
+#    para clientes que dependem de ferramenta de agendamento (schedulingMode = DIRECT)
 npx tsc --noEmit   # zero erros de tipo
 ```
 
-**Anti-padrão a evitar:** não misturar keys antigas com novas no mesmo array.
+**Anti-padrão a evitar:** não misturar keys antigas com novas no mesmo array. Não deixar importação falhar silenciosamente — se um módulo crítico não for derivado, logar aviso visível.
 
 ---
 
@@ -141,14 +147,24 @@ enum ModuleKey {
 
 **Posicionamento justificado:** a documentação Hawki coloca Ferramentas na posição 5 (após Tom, antes dos Fluxos). O modelo precisa saber quais ferramentas tem disponíveis antes de ler como executar os fluxos.
 
-### 2.2 — Regenerar client Prisma e sincronizar banco
+### 2.2 — Criar migration rastreável (não usar `db push`)
+
+> ⚠️ `db push` foi removido do plano. O repo já usa Prisma Migrations — usar `db push` criaria drift e removeria o rollback.
 
 ```bash
-npx prisma generate
-# Usar Session pooler (porta 5432) para DDL:
+# 1. Criar migration com nome descritivo
 DATABASE_URL="postgresql://postgres.PROJECT:PASS@aws-1-sa-east-1.pooler.supabase.com:5432/postgres" \
-  npx prisma db push
+  npx prisma migrate dev --name add_tools_module_key
+
+# 2. O arquivo gerado em prisma/migrations/ deve ser commitado junto com o código
+# 3. Em produção, usar migrate deploy (não migrate dev):
+DATABASE_URL="..." npx prisma migrate deploy
+
+# 4. Regenerar client Prisma
+npx prisma generate
 ```
+
+**Rollback:** se o deploy falhar, reverter com `git revert` + `prisma migrate deploy` (a migration de reversão precisa ser criada manualmente removendo o valor `TOOLS` do enum — anotar antes de executar).
 
 ### 2.3 — Atualizar `prompt-constants.ts`
 
@@ -209,22 +225,34 @@ Ferramenta de agendamento (condicional — incluir SOMENTE se schedulingSystem e
 
 ### Lógica condicional no contexto
 
-No `buildClientContext`, adicionar seção de ferramentas com mapeamento baseado em `schedulingSystem`:
+A instrução de ferramenta de agendamento deve respeitar **tanto `schedulingSystem` quanto `schedulingMode`**:
+
+| `schedulingMode` | Instrução gerada |
+|---|---|
+| `DIRECT` | Incluir instrução de tool call com trigger, pré-condições e fallback |
+| `HANDOFF` | Incluir instrução para passar para humano (não invocar API de agenda) |
+| `LINK` | Incluir instrução para enviar link (não invocar API de agenda) |
+| `null` | Omitir seção de agendamento |
 
 ```typescript
-// Mapear schedulingSystem → identificador Hawki (preencher com os IDs confirmados)
 const TOOL_IDS: Partial<Record<string, string>> = {
-  CLINICORP:       "IDENTIFICADOR_CLINICORP",      // preencher após confirmar
+  CLINICORP:       "IDENTIFICADOR_CLINICORP",      // preencher após confirmar no painel
   CONTROLE_ODONTO: "IDENTIFICADOR_CONTROLE_ODONTO",
   SIMPLES_DENTAL:  "IDENTIFICADOR_SIMPLES_DENTAL",
   GOOGLE_AGENDA:   "IDENTIFICADOR_GOOGLE_AGENDA",
 };
 
-if (client.schedulingSystem && TOOL_IDS[client.schedulingSystem]) {
-  lines.push(`\n=== FERRAMENTAS ===`);
-  lines.push(`Sistema de agendamento habilitado: ${TOOL_IDS[client.schedulingSystem]}`);
+if (client.schedulingSystem) {
+  lines.push(`\n=== FERRAMENTAS DE AGENDAMENTO ===`);
+  lines.push(`Modo: ${client.schedulingMode ?? "não configurado"}`);
+  if (client.schedulingMode === "DIRECT" && TOOL_IDS[client.schedulingSystem]) {
+    lines.push(`Ferramenta: ${TOOL_IDS[client.schedulingSystem]}`);
+    lines.push(`Dados obrigatórios configurados: ${client.schedulingRequirements ?? "nome, telefone"}`);
+  }
 }
 ```
+
+**Pré-condições derivadas do cliente:** usar `client.schedulingRequirements` como fonte dos dados obrigatórios — não hardcodar CPF/data de nascimento para todos os tenants.
 
 ### Verificação
 
