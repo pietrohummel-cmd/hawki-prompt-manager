@@ -46,6 +46,7 @@ export default function PromptPage() {
   const [loading, setLoading]             = useState(true);
   const [generating, setGenerating]       = useState(false);
   const [error, setError]                 = useState<string | null>(null);
+  const [regressionResult, setRegressionResult] = useState<{ total: number; passed: number; failed: number } | null>(null);
   const [expandedModule, setExpandedModule] = useState<ModuleKey | null>(null);
 
   // Modal de edição por módulo
@@ -94,11 +95,13 @@ export default function PromptPage() {
   async function handleGenerate() {
     setGenerating(true);
     setError(null);
+    setRegressionResult(null);
     try {
       const res  = await fetch(`/api/clients/${id}/generate-prompt`, { method: "POST" });
       const data = await res.json();
       if (!res.ok) throw new Error(data.detail ?? data.error ?? "Erro ao gerar");
       setActiveVersion(data);
+      if (data.regression) setRegressionResult(data.regression);
       await loadClient();
       showToast({
         type: "success",
@@ -253,7 +256,26 @@ export default function PromptPage() {
         </div>
       )}
 
-      {/* Estado vazio */}
+      {regressionResult && (
+        <div className={`flex items-center gap-3 text-[13px] px-4 py-3 rounded-lg mb-5 border ${
+          regressionResult.failed === 0
+            ? "bg-emerald-500/10 border-emerald-500/30 text-emerald-400"
+            : "bg-yellow-500/10 border-yellow-500/30 text-yellow-400"
+        }`}>
+          <span>{regressionResult.failed === 0 ? "✓" : "⚠"}</span>
+          <span>
+            Regressão: {regressionResult.passed}/{regressionResult.total} casos passaram
+            {regressionResult.failed > 0 && ` — ${regressionResult.failed} falharam`}
+          </span>
+          <button
+            onClick={() => setRegressionResult(null)}
+            className="ml-auto opacity-60 hover:opacity-100 transition-opacity"
+          >
+            <X size={13} />
+          </button>
+        </div>
+      )}
+
       {!activeVersion && !generating && (
         <div className="card p-12 text-center">
           <div className="w-10 h-10 rounded-xl bg-[var(--accent-subtle)] flex items-center justify-center mx-auto mb-4">

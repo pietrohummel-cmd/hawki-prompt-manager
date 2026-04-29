@@ -41,10 +41,10 @@ export default function RegressionPage() {
   const [saving, setSaving] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
 
-  // Painel de execução
+  // Execução
   const [runningCase, setRunningCase] = useState<string | null>(null);
+  const [runningAll, setRunningAll] = useState(false);
   const [activeRun, setActiveRun] = useState<{ caseId: string; run: RegressionRun } | null>(null);
-  const [savingRun, setSavingRun] = useState(false);
 
   const load = useCallback(async () => {
     try {
@@ -135,33 +135,19 @@ export default function RegressionPage() {
     }
   }
 
-  async function handleEvalCriterion(criterion: string, passed: boolean | null) {
-    if (!activeRun) return;
-    const newResults = activeRun.run.results.map((r) =>
-      r.criterion === criterion ? { ...r, passed } : r
-    );
-    const updatedRun = { ...activeRun.run, results: newResults };
-    setActiveRun({ ...activeRun, run: updatedRun });
-  }
-
-  async function saveRunResults() {
-    if (!activeRun) return;
-    setSavingRun(true);
+  async function handleRunAll() {
+    setRunningAll(true);
     try {
-      const res = await fetch(`/api/clients/${id}/regression/runs/${activeRun.run.id}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ results: activeRun.run.results }),
-      });
-      const data = await res.json();
-      setActiveRun({ ...activeRun, run: data });
-      setCases((prev) => prev.map((c) =>
-        c.id === activeRun.caseId
-          ? { ...c, runs: c.runs.map((r) => r.id === data.id ? data : r) }
-          : c
-      ));
+      const res = await fetch(`/api/clients/${id}/regression/run-all`, { method: "POST" });
+      if (!res.ok) {
+        const data = await res.json();
+        throw new Error(data.error ?? "Erro ao rodar todos");
+      }
+      await load();
+    } catch (err) {
+      alert(err instanceof Error ? err.message : "Erro ao rodar todos os casos");
     } finally {
-      setSavingRun(false);
+      setRunningAll(false);
     }
   }
 
@@ -198,7 +184,16 @@ export default function RegressionPage() {
             <p className={`text-2xl font-bold ${untested > 0 ? "text-yellow-400" : "text-[var(--text-muted)]"}`}>{untested}</p>
             <p className="text-xs text-[var(--text-muted)]">não testados</p>
           </div>
-          <div className="ml-auto">
+          <div className="ml-auto flex items-center gap-2">
+            <button
+              onClick={handleRunAll}
+              disabled={runningAll || runningCase !== null}
+              className="text-sm text-emerald-400 hover:text-emerald-300 border border-emerald-500/30 hover:border-emerald-500/60 px-4 py-2 rounded-md transition-colors disabled:opacity-50 flex items-center gap-2"
+            >
+              {runningAll ? (
+                <><span className="animate-spin inline-block w-3 h-3 border-2 border-emerald-500/30 border-t-emerald-400 rounded-full" />Rodando todos...</>
+              ) : "Rodar todos ▶▶"}
+            </button>
             <button
               onClick={openCreate}
               className="bg-emerald-500 hover:bg-emerald-400 text-black text-sm font-medium px-4 py-2 rounded-md transition-colors"
@@ -249,12 +244,12 @@ export default function RegressionPage() {
                       onClick={() => setActiveRun({ caseId: c.id, run: lastRun })}
                       className="text-xs text-[var(--text-muted)] hover:text-[var(--text-secondary)] px-3 py-1.5 border border-[var(--surface-border)] rounded-md transition-colors"
                     >
-                      Ver último run
+                      Ver resultado
                     </button>
                   )}
                   <button
                     onClick={() => handleRun(c)}
-                    disabled={runningCase === c.id}
+                    disabled={runningCase === c.id || runningAll}
                     className="text-xs text-emerald-400 hover:text-emerald-300 px-3 py-1.5 border border-emerald-500/30 hover:border-emerald-500/60 rounded-md transition-colors disabled:opacity-50"
                   >
                     {runningCase === c.id ? "Rodando..." : "Rodar ▶"}
@@ -278,7 +273,7 @@ export default function RegressionPage() {
         })}
       </div>
 
-      {/* Painel de resultado de run */}
+      {/* Painel de resultado de run (somente leitura) */}
       {activeRun && (
         <div className="fixed inset-0 z-50 bg-black/80 flex items-start justify-center p-4 overflow-y-auto">
           <div className="bg-[var(--surface)] border border-[var(--surface-border)] rounded-xl w-full max-w-2xl my-8 shadow-2xl">
@@ -309,50 +304,30 @@ export default function RegressionPage() {
                 </p>
               </div>
 
-              {/* Critérios */}
+              {/* Critérios — somente leitura */}
               <div>
-                <p className="text-xs text-[var(--text-muted)] mb-2">Avalie cada critério</p>
+                <p className="text-xs text-[var(--text-muted)] mb-2">Critérios avaliados pela IA</p>
                 <div className="space-y-2">
                   {activeRun.run.results.map((r) => (
-                    <div key={r.criterion} className="flex items-center justify-between gap-4 bg-[var(--surface-raised)] rounded-lg px-4 py-3">
+                    <div key={r.criterion} className={`flex items-center gap-3 rounded-lg px-4 py-3 ${
+                      r.passed === true
+                        ? "bg-emerald-500/10 border border-emerald-500/20"
+                        : r.passed === false
+                        ? "bg-red-500/10 border border-red-500/20"
+                        : "bg-[var(--surface-raised)] border border-[var(--surface-border)]"
+                    }`}>
+                      <span className={`text-sm shrink-0 ${r.passed === true ? "text-emerald-400" : r.passed === false ? "text-red-400" : "text-zinc-500"}`}>
+                        {r.passed === true ? "✓" : r.passed === false ? "✗" : "—"}
+                      </span>
                       <p className="text-sm text-[var(--text-primary)] flex-1">{r.criterion}</p>
-                      <div className="flex items-center gap-2 shrink-0">
-                        <button
-                          onClick={() => handleEvalCriterion(r.criterion, r.passed === true ? null : true)}
-                          className={`text-xs px-3 py-1.5 rounded-md border transition-colors ${
-                            r.passed === true
-                              ? "bg-emerald-500/20 text-emerald-400 border-emerald-500/40"
-                              : "text-[var(--text-muted)] border-[var(--surface-border)] hover:text-emerald-400 hover:border-emerald-500/30"
-                          }`}
-                        >
-                          Passou ✓
-                        </button>
-                        <button
-                          onClick={() => handleEvalCriterion(r.criterion, r.passed === false ? null : false)}
-                          className={`text-xs px-3 py-1.5 rounded-md border transition-colors ${
-                            r.passed === false
-                              ? "bg-red-500/20 text-red-400 border-red-500/40"
-                              : "text-[var(--text-muted)] border-[var(--surface-border)] hover:text-red-400 hover:border-red-500/30"
-                          }`}
-                        >
-                          Falhou ✗
-                        </button>
-                      </div>
                     </div>
                   ))}
                 </div>
               </div>
             </div>
 
-            <div className="flex items-center justify-end gap-2 px-5 py-4 border-t border-[var(--surface-border)]">
+            <div className="flex items-center justify-end px-5 py-4 border-t border-[var(--surface-border)]">
               <button onClick={() => setActiveRun(null)} className="text-sm text-[var(--text-muted)] hover:text-[var(--text-secondary)] px-4 py-2">Fechar</button>
-              <button
-                onClick={saveRunResults}
-                disabled={savingRun}
-                className="bg-emerald-500 hover:bg-emerald-400 disabled:opacity-50 text-black text-sm font-medium px-5 py-2 rounded-md transition-colors"
-              >
-                {savingRun ? "Salvando..." : "Salvar avaliação"}
-              </button>
             </div>
           </div>
         </div>

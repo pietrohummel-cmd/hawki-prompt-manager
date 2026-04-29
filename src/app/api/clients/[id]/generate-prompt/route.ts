@@ -2,6 +2,7 @@ import { auth } from "@clerk/nextjs/server";
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { generateClientPrompt, MODULE_ORDER } from "@/lib/generate-prompt";
+import { runRegressionCase } from "@/lib/regression-runner";
 import type { ModuleKey } from "@/generated/prisma";
 
 export async function POST(
@@ -69,7 +70,23 @@ export async function POST(
       data: { status: "ACTIVE" },
     });
 
-    return NextResponse.json(version);
+    // Roda regressão automática se houver casos cadastrados
+    const regressionCases = await prisma.regressionCase.findMany({
+      where: { clientId: id },
+      orderBy: { createdAt: "asc" },
+    });
+
+    let regression: { total: number; passed: number; failed: number } | null = null;
+
+    if (regressionCases.length > 0) {
+      const results = await Promise.allSettled(
+        regressionCases.map((c) => runRegressionCase(c, version))
+      );
+      const passed = results.filter((r) => r.status === "fulfilled" && r.value.status === "PASSED").length;
+      regression = { total: regressionCases.length, passed, failed: regressionCases.length - passed };
+    }
+
+    return NextResponse.json({ ...version, regression });
   } catch (err) {
     console.error("[POST generate-prompt]", err);
     return NextResponse.json(
