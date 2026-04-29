@@ -197,19 +197,19 @@ export default function NewClientPage() {
   }
 
   return (
-    <div className="max-w-3xl">
-      <h1 className="text-2xl font-semibold text-white mb-1">Novo cliente</h1>
-      <p className="text-zinc-400 text-sm mb-8">
+    <div className="max-w-3xl animate-fade-up">
+      <h1 className="text-2xl font-semibold text-[var(--text-primary)] mb-1">Novo cliente</h1>
+      <p className="text-[var(--text-muted)] text-sm mb-8">
         Preencha os dados da clínica ou faça upload do CSV de onboarding para pré-preencher o formulário.
       </p>
 
       {/* Upload CSV */}
-      <div className="bg-zinc-900 border border-zinc-800 rounded-lg p-5 mb-8">
-        <p className="text-sm font-medium text-zinc-300 mb-3">
+      <div className="bg-[var(--surface)] border border-[var(--surface-border)] rounded-lg p-5 mb-8">
+        <p className="text-sm font-medium text-[var(--text-secondary)] mb-3">
           Importar formulário de onboarding (opcional)
         </p>
         <label className="flex items-center gap-3 cursor-pointer group">
-          <span className="bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 text-zinc-300 text-xs px-3 py-1.5 rounded transition-colors">
+          <span className="bg-[var(--surface-raised)] hover:bg-[var(--surface-hover)] border border-[var(--surface-border)] text-[var(--text-secondary)] text-xs px-3 py-1.5 rounded transition-colors">
             {uploading ? "Processando..." : "Escolher arquivo (.csv ou .xlsx)"}
           </span>
           <input
@@ -229,13 +229,13 @@ export default function NewClientPage() {
         {/* Campos não mapeados do CSV */}
         {Object.keys(csvUnmapped).length > 0 && (
           <details className="mt-3">
-            <summary className="text-xs text-zinc-500 cursor-pointer hover:text-zinc-400">
+            <summary className="text-xs text-[var(--text-disabled)] cursor-pointer hover:text-[var(--text-muted)]">
               {Object.keys(csvUnmapped).length} coluna(s) não mapeada(s) — clique para ver
             </summary>
             <div className="mt-2 space-y-1">
               {Object.entries(csvUnmapped).map(([k, v]) => (
-                <p key={k} className="text-xs text-zinc-600">
-                  <span className="text-zinc-500">{k}:</span> {v}
+                <p key={k} className="text-xs text-[var(--text-disabled)]">
+                  <span className="text-[var(--text-muted)]">{k}:</span> {v}
                 </p>
               ))}
             </div>
@@ -499,14 +499,14 @@ export default function NewClientPage() {
           <button
             type="submit"
             disabled={saving}
-            className="bg-emerald-500 hover:bg-emerald-400 disabled:opacity-50 text-black font-medium text-sm px-6 py-2.5 rounded-md transition-colors"
+            className="press bg-[var(--accent)] hover:bg-[var(--accent-hover)] disabled:opacity-50 text-white font-medium text-sm px-6 py-2.5 rounded-md transition-colors"
           >
             {saving ? "Salvando..." : "Salvar e gerar prompt →"}
           </button>
           <button
             type="button"
             onClick={() => router.back()}
-            className="text-zinc-400 hover:text-zinc-200 text-sm px-4 py-2.5 transition-colors"
+            className="text-[var(--text-muted)] hover:text-[var(--text-secondary)] text-sm px-4 py-2.5 transition-colors"
           >
             Cancelar
           </button>
@@ -520,7 +520,7 @@ export default function NewClientPage() {
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
   return (
     <div>
-      <h2 className="text-xs font-semibold uppercase tracking-widest text-zinc-500 mb-4 pb-2 border-b border-zinc-800">
+      <h2 className="text-xs font-semibold uppercase tracking-widest text-[var(--text-disabled)] mb-4 pb-2 border-b border-[var(--surface-border)]">
         {title}
       </h2>
       {children}
@@ -541,7 +541,7 @@ function Field({
 }) {
   return (
     <div className={className}>
-      <label className="block text-xs text-zinc-400 mb-1.5">{label}</label>
+      <label className="block text-xs text-[var(--text-muted)] mb-1.5">{label}</label>
       {children}
       {error && <p className="text-xs text-red-400 mt-1">{error}</p>}
     </div>
@@ -549,5 +549,5 @@ function Field({
 }
 
 function input() {
-  return "w-full bg-zinc-900 border border-zinc-700 text-zinc-100 text-sm rounded-md px-3 py-2 placeholder:text-zinc-600 focus:outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500/30 transition-colors resize-none";
+  return "w-full bg-[var(--surface)] border border-[var(--surface-border)] text-[var(--text-primary)] text-sm rounded-md px-3 py-2 placeholder:text-[var(--text-disabled)] focus:outline-none focus:border-[var(--accent)] focus:ring-1 focus:ring-[var(--accent)]/30 transition-colors resize-none";
 }
