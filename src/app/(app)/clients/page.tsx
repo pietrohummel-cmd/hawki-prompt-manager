@@ -8,7 +8,7 @@ export default async function ClientsPage() {
   const clients = await prisma.client.findMany({
     orderBy: { createdAt: "desc" },
     include: {
-      _count: { select: { promptVersions: true } },
+      _count: { select: { promptVersions: true, tickets: true } },
       tickets: {
         where: { status: { in: ["OPEN", "SUGGESTED"] } },
         select: { priority: true },
