@@ -6,6 +6,7 @@ import { prisma } from "@/lib/prisma";
 const createSchema = z.object({
   name: z.string().min(1),
   input: z.string().min(1),
+  expectedResponse: z.string().optional().nullable(),
   criteria: z.array(z.string().min(1)).min(1, "Ao menos um critério"),
 });
 

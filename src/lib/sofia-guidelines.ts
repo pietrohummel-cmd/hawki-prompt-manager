@@ -41,6 +41,15 @@ export const SOFIA_GUIDELINES_CONDENSED = `
 - Negação em exemplos few-shot ("não faça assim") — o modelo imita o antiexemplo.
 - Mais de 8 exemplos few-shot — custo sem ganho proporcional.
 - "Você é uma IA mas não admita isso" — o usuário vai perguntar; mentir gera perda de confiança.
+
+### Humanização do output (anti-IA)
+- NUNCA usar travessão (—) nas mensagens. Travessão é marca registrada de texto gerado por IA; atendentes humanos não o usam no WhatsApp.
+- Preferir vírgula, ponto ou quebra de linha curta no lugar do travessão.
+- NUNCA usar bullet points ou listas numeradas em mensagens de WhatsApp. Listas soam como chatbot.
+- Frases curtas. Máximo 2 linhas por bloco de texto antes de quebrar.
+- Linguagem coloquial brasileira: "tudo bem?", "pode deixar", "a gente" — não "estamos à disposição", "conforme solicitado".
+- NUNCA iniciar mensagem com o nome do paciente ("Olá, João!") — soa automatizado.
+- Emojis com moderação: 1 por mensagem, nunca no início da frase.
 `.trim();
 
 // Versão completa — conteúdo LITERAL dos 10 arquivos prompts-*.md

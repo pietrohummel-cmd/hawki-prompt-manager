@@ -1,7 +1,12 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { prisma } from "@/lib/prisma";
 import { MODULE_ORDER } from "@/lib/prompt-constants";
-import type { ModuleKey, RegressionCase, RegressionRun, PromptVersion, PromptModule } from "@/generated/prisma";
+import type { ModuleKey, RegressionCase, RegressionRun, PromptVersion, PromptModule, Prisma } from "@/generated/prisma";
+
+type RegressionCaseWithExpected = RegressionCase & {
+  criteria: string[];
+  expectedResponse?: string | null;
+};
 
 function getAnthropic() {
   return new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
@@ -10,7 +15,7 @@ function getAnthropic() {
 type ActiveVersion = PromptVersion & { modules: PromptModule[] };
 
 export async function runRegressionCase(
-  regressionCase: RegressionCase & { criteria: string[] },
+  regressionCase: RegressionCaseWithExpected,
   activeVersion: ActiveVersion
 ): Promise<RegressionRun> {
   const systemPrompt = MODULE_ORDER
@@ -39,10 +44,14 @@ export async function runRegressionCase(
     .map((c, i) => `${i + 1}. ${c}`)
     .join("\n");
 
+  const expectedBlock = regressionCase.expectedResponse
+    ? `\nResposta ideal esperada (use como referência de tom, estrutura e conteúdo):\n${regressionCase.expectedResponse}\n`
+    : "";
+
   const evalPrompt = `Você avalia se uma resposta de assistente de IA satisfaz critérios de qualidade.
 
 Mensagem do paciente: ${regressionCase.input}
-
+${expectedBlock}
 Resposta da assistente: ${responseText}
 
 Para cada critério abaixo, responda APENAS com "PASSOU" ou "FALHOU" — uma resposta por linha, sem texto adicional:

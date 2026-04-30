@@ -215,14 +215,15 @@ model CorrectionTicket {
 // ─────────────────────────────────────────────
 
 model RegressionCase {
-  id        String          @id @default(cuid())
-  clientId  String
-  client    Client          @relation(fields: [clientId], references: [id], onDelete: Cascade)
-  name      String
-  input     String          @db.Text  // mensagem de entrada enviada para a Sofia
-  criteria  String[]                  // lista de critérios esperados
-  createdAt DateTime        @default(now())
-  updatedAt DateTime        @updatedAt
+  id               String          @id @default(cuid())
+  clientId         String
+  client           Client          @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  name             String
+  input            String          @db.Text  // mensagem de entrada enviada para a Sofia
+  expectedResponse String?         @db.Text  // como a Sofia deveria responder idealmente (opcional)
+  criteria         String[]                  // lista de critérios esperados
+  createdAt        DateTime        @default(now())
+  updatedAt        DateTime        @updatedAt
 
   runs      RegressionRun[]
 }

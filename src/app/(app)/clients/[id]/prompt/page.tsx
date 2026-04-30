@@ -299,6 +299,14 @@ export default function PromptPage() {
             Regressão: {regressionResult.passed}/{regressionResult.total} casos passaram
             {regressionResult.failed > 0 && ` — ${regressionResult.failed} falharam`}
           </span>
+          {regressionResult.failed > 0 && (
+            <Link
+              href={`/clients/${id}/regression`}
+              className="flex items-center gap-1 text-[12px] font-medium underline-offset-2 hover:underline shrink-0 group"
+            >
+              Ver regressão <ArrowRight size={11} className="group-hover:translate-x-0.5 transition-transform" />
+            </Link>
+          )}
           <button
             onClick={() => setRegressionResult(null)}
             className="ml-auto opacity-60 hover:opacity-100 transition-opacity"

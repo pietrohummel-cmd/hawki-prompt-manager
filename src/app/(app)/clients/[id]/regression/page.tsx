@@ -15,6 +15,7 @@ interface RegressionCase {
   id: string;
   name: string;
   input: string;
+  expectedResponse?: string | null;
   criteria: string[];
   createdAt: string;
   runs: RegressionRun[];
@@ -37,6 +38,7 @@ export default function RegressionPage() {
   const [editingCase, setEditingCase] = useState<RegressionCase | null>(null);
   const [formName, setFormName] = useState("");
   const [formInput, setFormInput] = useState("");
+  const [formExpectedResponse, setFormExpectedResponse] = useState("");
   const [formCriteria, setFormCriteria] = useState<string[]>([""]);
   const [saving, setSaving] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
@@ -64,6 +66,7 @@ export default function RegressionPage() {
     setEditingCase(null);
     setFormName("");
     setFormInput("");
+    setFormExpectedResponse("");
     setFormCriteria([""]);
     setFormError(null);
     setShowForm(true);
@@ -73,6 +76,7 @@ export default function RegressionPage() {
     setEditingCase(c);
     setFormName(c.name);
     setFormInput(c.input);
+    setFormExpectedResponse(c.expectedResponse ?? "");
     setFormCriteria([...c.criteria]);
     setFormError(null);
     setShowForm(true);
@@ -87,7 +91,12 @@ export default function RegressionPage() {
     setSaving(true);
     setFormError(null);
     try {
-      const body = { name: formName.trim(), input: formInput.trim(), criteria };
+      const body = {
+        name: formName.trim(),
+        input: formInput.trim(),
+        expectedResponse: formExpectedResponse.trim() || null,
+        criteria,
+      };
       let res: Response;
       if (editingCase) {
         res = await fetch(`/api/clients/${id}/regression/${editingCase.id}`, {
@@ -304,6 +313,18 @@ export default function RegressionPage() {
                 </p>
               </div>
 
+              {/* Resposta ideal (se definida) */}
+              {cases.find((c) => c.id === activeRun.caseId)?.expectedResponse && (
+                <div>
+                  <p className="text-xs text-[var(--text-muted)] mb-2">Resposta ideal esperada</p>
+                  <div className="bg-[var(--surface-raised)] border border-emerald-500/20 rounded-lg px-4 py-3 max-h-36 overflow-y-auto">
+                    <p className="text-sm text-[var(--text-secondary)] whitespace-pre-wrap leading-relaxed">
+                      {cases.find((c) => c.id === activeRun.caseId)?.expectedResponse}
+                    </p>
+                  </div>
+                </div>
+              )}
+
               {/* Critérios — somente leitura */}
               <div>
                 <p className="text-xs text-[var(--text-muted)] mb-2">Critérios avaliados pela IA</p>
@@ -363,6 +384,21 @@ export default function RegressionPage() {
                   placeholder="Mensagem que o lead envia para a Sofia..."
                   className="w-full bg-[var(--surface-raised)] border border-[var(--surface-border)] text-[var(--text-primary)] text-sm rounded-md px-3 py-2.5 resize-none focus:outline-none focus:border-emerald-500 leading-relaxed"
                 />
+              </div>
+              <div>
+                <label className="text-xs text-[var(--text-muted)] mb-2 block">
+                  Resposta ideal <span className="text-[var(--text-disabled)]">(opcional — usada como referência na avaliação)</span>
+                </label>
+                <textarea
+                  value={formExpectedResponse}
+                  onChange={(e) => setFormExpectedResponse(e.target.value)}
+                  rows={4}
+                  placeholder="Descreva como a Sofia deveria responder idealmente nesse cenário..."
+                  className="w-full bg-[var(--surface-raised)] border border-[var(--surface-border)] text-[var(--text-primary)] text-sm rounded-md px-3 py-2.5 resize-none focus:outline-none focus:border-emerald-500 leading-relaxed"
+                />
+                <p className="text-[11px] text-[var(--text-disabled)] mt-1">
+                  Exemplo de tom, estrutura e conteúdo que o avaliador vai usar como referência para julgar os critérios.
+                </p>
               </div>
               <div>
                 <div className="flex items-center justify-between mb-2">
