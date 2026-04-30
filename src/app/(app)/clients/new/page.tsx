@@ -190,7 +190,11 @@ export default function NewClientPage() {
       const client = await res.json();
 
       // Gera o primeiro prompt automaticamente — sem etapa extra para o usuário
-      await fetch(`/api/clients/${client.id}/generate-prompt`, { method: "POST" });
+      const genRes = await fetch(`/api/clients/${client.id}/generate-prompt`, { method: "POST" });
+      if (!genRes.ok) {
+        const genErr = await genRes.json().catch(() => ({}));
+        throw new Error(genErr.error ?? "Cliente criado, mas falha ao gerar o prompt. Tente gerar manualmente na aba Prompt.");
+      }
 
       router.push(`/clients/${client.id}/prompt`);
     } catch (err) {

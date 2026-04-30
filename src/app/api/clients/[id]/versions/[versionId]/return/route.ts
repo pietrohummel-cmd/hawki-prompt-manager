@@ -43,12 +43,6 @@ export async function POST(
   const client = await prisma.client.findUnique({ where: { id } });
   if (!client) return NextResponse.json({ error: "Cliente não encontrado" }, { status: 404 });
 
-  // Arquiva a versão rejeitada
-  await prisma.promptVersion.update({
-    where: { id: versionId },
-    data: { status: "ARCHIVED" },
-  });
-
   // Reconstrói o mapa de módulos da versão rejeitada
   const modules: Partial<Record<ModuleKey, string>> = {};
   for (const mod of version.modules) {
@@ -57,12 +51,18 @@ export async function POST(
     }
   }
 
-  // Roda o pipeline com o feedback como descrição do problema
   const combinedDescription = version.problemDescription
     ? `${version.problemDescription}\n\nFeedback adicional: ${feedback}`
     : feedback;
 
+  // Roda o pipeline ANTES de arquivar — se falhar, o draft original é preservado
   const result = await runCorrectionPipeline(client, modules, combinedDescription);
+
+  // Só arquiva a versão rejeitada após o substituto ter sido criado com sucesso
+  await prisma.promptVersion.update({
+    where: { id: versionId },
+    data: { status: "ARCHIVED" },
+  });
 
   return NextResponse.json({
     versionId: result.versionId,
