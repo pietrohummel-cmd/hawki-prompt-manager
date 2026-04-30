@@ -30,16 +30,12 @@ const STATUS_LABELS: Record<ClientStatus, string> = {
 };
 
 const tabs = [
-  { label: "Prompt",     href: (id: string) => `/clients/${id}/prompt` },
-  { label: "Versões",    href: (id: string) => `/clients/${id}/versions` },
-  { label: "Tickets",    href: (id: string) => `/clients/${id}/tickets` },
-  { label: "Simulação",  href: (id: string) => `/clients/${id}/simulation` },
-  { label: "Conversas",  href: (id: string) => `/clients/${id}/conversations` },
-  { label: "Regressão",  href: (id: string) => `/clients/${id}/regression` },
-  { label: "Calibração", href: (id: string) => `/clients/${id}/calibration` },
-  { label: "Copiloto",   href: (id: string) => `/clients/${id}/copilot` },
-  { label: "KB",         href: (id: string) => `/clients/${id}/knowledge` },
-  { label: "Origens",    href: (id: string) => `/clients/${id}/origins` },
+  { label: "Prompt",    href: (id: string) => `/clients/${id}/prompt` },
+  { label: "Versões",   href: (id: string) => `/clients/${id}/versions` },
+  { label: "Tickets",   href: (id: string) => `/clients/${id}/tickets` },
+  { label: "Simulação", href: (id: string) => `/clients/${id}/simulation` },
+  { label: "Regressão", href: (id: string) => `/clients/${id}/regression` },
+  { label: "KB",        href: (id: string) => `/clients/${id}/knowledge` },
 ];
 
 interface PromptModule {

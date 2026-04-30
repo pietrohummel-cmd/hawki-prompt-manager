@@ -58,10 +58,11 @@ export default function PromptPage() {
   const [saveError, setSaveError]         = useState<string | null>(null);
 
   // Modal de importação
-  const [showImport, setShowImport]     = useState(false);
-  const [importText, setImportText]     = useState("");
-  const [importing, setImporting]       = useState(false);
-  const [importError, setImportError]   = useState<string | null>(null);
+  const [showImport, setShowImport]       = useState(false);
+  const [importText, setImportText]       = useState("");
+  const [importProblem, setImportProblem] = useState("");
+  const [importing, setImporting]         = useState(false);
+  const [importError, setImportError]     = useState<string | null>(null);
 
   const loadClient = useCallback(async () => {
     try {
@@ -121,6 +122,7 @@ export default function PromptPage() {
   function closeImport() {
     setShowImport(false);
     setImportText("");
+    setImportProblem("");
     setImportError(null);
   }
 
@@ -132,13 +134,20 @@ export default function PromptPage() {
       const res  = await fetch(`/api/clients/${id}/import-prompt`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ rawText: importText }),
+        body: JSON.stringify({ rawText: importText, problemDescription: importProblem || undefined }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error ?? "Erro ao importar");
       closeImport();
       await loadClient();
-      showToast({ type: "success", message: "Prompt importado e organizado em módulos." });
+      if (data.pipeline) {
+        showToast({
+          type: "success",
+          message: `Pipeline concluído — ${data.issueCount} problema${data.issueCount !== 1 ? "s" : ""} corrigido${data.issueCount !== 1 ? "s" : ""}. Aguardando revisão.`,
+        });
+      } else {
+        showToast({ type: "success", message: "Prompt importado e organizado em módulos." });
+      }
     } catch (err) {
       setImportError(err instanceof Error ? err.message : "Erro ao importar");
     } finally {
@@ -394,7 +403,9 @@ export default function PromptPage() {
               {importing && (
                 <div className="bg-[var(--surface-raised)] border border-[var(--surface-border)] rounded-md px-4 py-3 text-[12px] text-[var(--text-secondary)] flex items-center gap-2">
                   <span className="w-3 h-3 border-2 border-[var(--text-disabled)] border-t-[var(--accent)] rounded-full animate-spin shrink-0" />
-                  Processando com IA... pode levar até 30s.
+                  {importProblem.trim()
+                    ? "Rodando pipeline de correção... pode levar até 60s."
+                    : "Processando com IA... pode levar até 30s."}
                 </div>
               )}
 
@@ -405,10 +416,28 @@ export default function PromptPage() {
                 <textarea
                   value={importText}
                   onChange={(e) => setImportText(e.target.value)}
-                  rows={18}
+                  rows={14}
                   placeholder="Cole aqui o conteúdo completo do prompt..."
                   className="w-full bg-[var(--surface-raised)] border border-[var(--surface-border)] text-[var(--text-primary)] text-[12px] rounded-md px-3 py-2.5 font-mono resize-none focus:outline-none focus:border-[var(--accent)] placeholder:text-[var(--text-disabled)] leading-relaxed transition-colors"
                 />
+              </div>
+
+              <div>
+                <label className="text-[11px] font-medium text-[var(--text-muted)] uppercase tracking-[0.1em] mb-1.5 block">
+                  Problema relatado <span className="normal-case text-[var(--text-disabled)]">(opcional — ativa pipeline de correção automática)</span>
+                </label>
+                <textarea
+                  value={importProblem}
+                  onChange={(e) => setImportProblem(e.target.value)}
+                  rows={3}
+                  placeholder="Ex: Sofia está confirmando consultas sem perguntar o nome do paciente..."
+                  className="w-full bg-[var(--surface-raised)] border border-[var(--surface-border)] text-[var(--text-primary)] text-[12px] rounded-md px-3 py-2.5 resize-none focus:outline-none focus:border-[var(--accent)] placeholder:text-[var(--text-disabled)] leading-relaxed transition-colors"
+                />
+                {importProblem.trim() && (
+                  <p className="mt-1.5 text-[11px] text-[var(--accent-text)]">
+                    O pipeline vai analisar o prompt, corrigir os problemas e criar uma versão para revisão.
+                  </p>
+                )}
               </div>
 
               {importError && (
@@ -435,7 +464,9 @@ export default function PromptPage() {
                 ) : (
                   <Upload size={13} />
                 )}
-                {importing ? "Importando..." : "Importar prompt"}
+                {importing
+                  ? (importProblem.trim() ? "Corrigindo..." : "Importando...")
+                  : (importProblem.trim() ? "Importar e corrigir" : "Importar prompt")}
               </button>
             </div>
           </div>

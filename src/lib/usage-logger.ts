@@ -25,7 +25,9 @@ export type OperationType =
   | "suggest_ticket"
   | "import_restructure"
   | "identify_module"
-  | "generate_kb";
+  | "generate_kb"
+  | "pipeline_analyze"
+  | "pipeline_fix";
 
 export interface UsageData {
   input_tokens: number;

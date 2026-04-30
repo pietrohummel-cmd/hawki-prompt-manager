@@ -3,7 +3,9 @@ import { prisma } from "@/lib/prisma";
 import { MODULE_ORDER } from "@/lib/prompt-constants";
 import type { ModuleKey, RegressionCase, RegressionRun, PromptVersion, PromptModule } from "@/generated/prisma";
 
-const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
+function getAnthropic() {
+  return new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
+}
 
 type ActiveVersion = PromptVersion & { modules: PromptModule[] };
 
@@ -20,7 +22,7 @@ export async function runRegressionCase(
     .join("\n\n");
 
   // Step 1: get Sofia's response
-  const sofiaResponse = await anthropic.messages.create({
+  const sofiaResponse = await getAnthropic().messages.create({
     model: "claude-sonnet-4-6",
     max_tokens: 1024,
     system: systemPrompt,
@@ -46,7 +48,7 @@ Resposta da assistente: ${responseText}
 Para cada critério abaixo, responda APENAS com "PASSOU" ou "FALHOU" — uma resposta por linha, sem texto adicional:
 ${criteriaList}`;
 
-  const evalResponse = await anthropic.messages.create({
+  const evalResponse = await getAnthropic().messages.create({
     model: "claude-haiku-4-5-20251001",
     max_tokens: 256,
     messages: [{ role: "user", content: evalPrompt }],

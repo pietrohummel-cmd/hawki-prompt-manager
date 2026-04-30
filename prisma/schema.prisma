@@ -77,6 +77,12 @@ enum RegressionRunStatus {
   FAILED
 }
 
+enum PromptVersionStatus {
+  PENDING_REVIEW  // aguardando aprovação humana após pipeline automático
+  ACTIVE          // versão operacional atual
+  ARCHIVED        // versão anterior
+}
+
 enum ConvOutcome {
   SCHEDULED
   NOT_SCHEDULED
@@ -152,11 +158,13 @@ model PromptVersion {
   systemPrompt    String      @db.Text
   ragDocument     String?     @db.Text
   narrativeManual String?     @db.Text
-  isActive        Boolean     @default(false)
-  generatedBy     GeneratedBy @default(AI)
-  changesSummary  String?     // motivo da mudança (input do usuário)
-  savedBy         String?     // Clerk userId de quem salvou
-  createdAt       DateTime    @default(now())
+  isActive           Boolean              @default(false)
+  status             PromptVersionStatus  @default(ACTIVE)
+  problemDescription String?              @db.Text  // problema descrito pelo usuário no import
+  generatedBy        GeneratedBy          @default(AI)
+  changesSummary     String?              // motivo da mudança (input do usuário)
+  savedBy            String?              // Clerk userId de quem salvou
+  createdAt          DateTime             @default(now())
 
   modules             PromptModule[]
   tickets             CorrectionTicket[]

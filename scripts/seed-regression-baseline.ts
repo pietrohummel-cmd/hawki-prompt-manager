@@ -5,9 +5,15 @@
  * Pula casos que já existem com o mesmo nome (idempotente).
  */
 import "dotenv/config";
-import { PrismaClient } from "../src/generated/prisma";
+import { Pool } from "pg";
+import { PrismaPg } from "@prisma/adapter-pg";
+import { PrismaClient } from "../src/generated/prisma/index.js";
 
-const prisma = new PrismaClient();
+const pool = new Pool({
+  connectionString: process.env.DATABASE_URL,
+  ssl: { rejectUnauthorized: false },
+});
+const prisma = new PrismaClient({ adapter: new PrismaPg(pool) });
 
 const BASELINE_CASES = [
   {
@@ -42,9 +48,9 @@ const BASELINE_CASES = [
     name: "Objeção preço",
     input: "Está muito caro pra mim",
     criteria: [
-      "Usa script de objeção configurado no prompt, sem inventar scripts",
+      "Usa script de objeção sem inventar scripts novos",
       "Não inventa parcelamentos ou descontos não configurados",
-      "Oferece a avaliação gratuita como alternativa (se configurada)",
+      "Oferece alternativa para continuar a conversa",
     ],
   },
   {
@@ -69,8 +75,12 @@ const BASELINE_CASES = [
 async function main() {
   const clientId = process.argv[2];
   if (!clientId) {
-    console.error("Uso: npx tsx scripts/seed-regression-baseline.ts <clientId>");
-    process.exit(1);
+    // Se não passou clientId, lista os disponíveis
+    const clients = await prisma.client.findMany({ select: { id: true, clinicName: true } });
+    console.log("Uso: npx tsx scripts/seed-regression-baseline.ts <clientId>\n");
+    console.log("Clientes disponíveis:");
+    clients.forEach((c) => console.log(`  ${c.id}  |  ${c.clinicName}`));
+    return;
   }
 
   const client = await prisma.client.findUnique({ where: { id: clientId } });
@@ -96,9 +106,7 @@ async function main() {
       skipped++;
       continue;
     }
-    await prisma.regressionCase.create({
-      data: { clientId, ...c },
-    });
+    await prisma.regressionCase.create({ data: { clientId, ...c } });
     console.log(`  ✓  Criado: "${c.name}"`);
     created++;
   }
@@ -109,4 +117,4 @@ async function main() {
 
 main()
   .catch((e) => { console.error(e); process.exit(1); })
-  .finally(() => prisma.$disconnect());
+  .finally(() => pool.end());

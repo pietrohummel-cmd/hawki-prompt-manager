@@ -20,16 +20,18 @@ const createTicketSchema = z.object({
  * Lista todos os tickets de correção de um cliente.
  */
 export async function GET(
-  _request: Request,
+  request: Request,
   { params }: { params: Promise<{ id: string }> }
 ) {
   const { userId } = await auth();
   if (!userId) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
   const { id } = await params;
+  const { searchParams } = new URL(request.url);
+  const versionId = searchParams.get("versionId");
 
   const tickets = await prisma.correctionTicket.findMany({
-    where: { clientId: id },
+    where: { clientId: id, ...(versionId ? { promptVersionId: versionId } : {}) },
     orderBy: { createdAt: "desc" },
     include: {
       promptVersion: { select: { version: true } },

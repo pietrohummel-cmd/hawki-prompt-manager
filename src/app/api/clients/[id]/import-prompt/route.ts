@@ -4,11 +4,13 @@ import { z } from "zod";
 import { prisma } from "@/lib/prisma";
 import { MODULE_ORDER } from "@/lib/prompt-constants";
 import { restructurePromptToModules } from "@/lib/generate-prompt";
+import { runCorrectionPipeline } from "@/lib/correction-pipeline";
 import type { ModuleKey } from "@/generated/prisma";
 
 const schema = z.object({
   rawText: z.string().min(10, "Cole o conteúdo do prompt"),
   changesSummary: z.string().optional(),
+  problemDescription: z.string().optional(),
 });
 
 function parseModules(text: string): Partial<Record<ModuleKey, string>> {
@@ -48,7 +50,7 @@ export async function POST(
   const client = await prisma.client.findUnique({ where: { id } });
   if (!client) return NextResponse.json({ error: "Cliente não encontrado" }, { status: 404 });
 
-  const { rawText, changesSummary } = parsed.data;
+  const { rawText, changesSummary, problemDescription } = parsed.data;
   let modules = parseModules(rawText);
   let foundKeys = Object.keys(modules) as ModuleKey[];
   let usedAI = false;
@@ -76,20 +78,36 @@ export async function POST(
     );
   }
 
-  // Calcula próxima versão
+  // Se o operador descreveu um problema, dispara o pipeline automático de correção.
+  // O pipeline cria uma versão PENDING_REVIEW com correções + tickets + regressão.
+  if (problemDescription?.trim()) {
+    const result = await runCorrectionPipeline(client, modules, problemDescription.trim());
+
+    await prisma.client.update({ where: { id }, data: { status: "ACTIVE" } });
+
+    return NextResponse.json({
+      pipeline: true,
+      versionId: result.versionId,
+      issueCount: result.issueCount,
+      regressionTotal: result.regressionTotal,
+      regressionPassed: result.regressionPassed,
+      modulesFound: foundKeys.length,
+      usedAI,
+    });
+  }
+
+  // Sem descrição de problema: importação direta como versão ACTIVE.
   const lastVersion = await prisma.promptVersion.findFirst({
     where: { clientId: id },
     orderBy: { version: "desc" },
   });
   const nextVersion = (lastVersion?.version ?? 0) + 1;
 
-  // Reconstrói o systemPrompt ordenado
   const fullPrompt = MODULE_ORDER
     .filter((key) => modules[key])
     .map((key) => `###MÓDULO:${key}###\n${modules[key]}`)
     .join("\n\n");
 
-  // Desativa versão atual e cria a nova
   await prisma.promptVersion.updateMany({
     where: { clientId: id, isActive: true },
     data: { isActive: false },
@@ -114,11 +132,7 @@ export async function POST(
     include: { modules: true },
   });
 
-  // Atualiza status para ACTIVE
-  await prisma.client.update({
-    where: { id },
-    data: { status: "ACTIVE" },
-  });
+  await prisma.client.update({ where: { id }, data: { status: "ACTIVE" } });
 
-  return NextResponse.json({ version, modulesFound: foundKeys.length, usedAI });
+  return NextResponse.json({ pipeline: false, version, modulesFound: foundKeys.length, usedAI });
 }

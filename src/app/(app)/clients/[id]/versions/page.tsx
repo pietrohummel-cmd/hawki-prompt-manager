@@ -3,7 +3,7 @@
 import { useEffect, useState, useCallback } from "react";
 import { useParams } from "next/navigation";
 import {
-  Copy, Check, Download, GitCompare, X, GitBranch,
+  Copy, Check, Download, GitCompare, X, GitBranch, CheckCircle, RotateCcw,
 } from "lucide-react";
 import { diffLines as myersDiffLines } from "diff";
 import type { ModuleKey } from "@/generated/prisma";
@@ -21,12 +21,22 @@ interface PromptVersion {
   id: string;
   version: number;
   isActive: boolean;
+  status: "PENDING_REVIEW" | "ACTIVE" | "ARCHIVED";
   generatedBy: "AI" | "MANUAL";
   changesSummary: string | null;
+  problemDescription: string | null;
   systemPrompt: string;
   createdAt: string;
   _count: { modules: number };
   modules: VersionModule[];
+}
+
+interface Ticket {
+  id: string;
+  description: string;
+  affectedModule: ModuleKey | null;
+  priority: "CRITICAL" | "NORMAL" | "IMPROVEMENT";
+  finalCorrection: string | null;
 }
 
 /* ── Diff utilitário (Myers LCS via "diff" lib) ─────────── */
@@ -81,6 +91,15 @@ export default function VersionsPage() {
   const [confirmActivate, setConfirmActivate] = useState<string | null>(null);
   const [activating, setActivating]           = useState<string | null>(null);
 
+  // Approve / Return pipeline version
+  const [approving, setApproving]     = useState<string | null>(null);
+  const [returnModal, setReturnModal] = useState<PromptVersion | null>(null);
+  const [returnFeedback, setReturnFeedback]   = useState("");
+  const [returning, setReturning]     = useState(false);
+
+  // Tickets de uma versão PENDING_REVIEW
+  const [versionTickets, setVersionTickets] = useState<Record<string, Ticket[]>>({});
+
   // Copiar por versão
   const [copiedId, setCopiedId] = useState<string | null>(null);
 
@@ -98,13 +117,70 @@ export default function VersionsPage() {
 
   useEffect(() => { load(); }, [load]);
 
-  // Fechar diff com Escape
   useEffect(() => {
-    if (!diffVersion) return;
-    const h = (e: KeyboardEvent) => { if (e.key === "Escape") setDiffVersion(null); };
+    const pending = versions.filter((v) => v.status === "PENDING_REVIEW");
+    pending.forEach((v) => {
+      if (versionTickets[v.id]) return;
+      fetch(`/api/clients/${id}/tickets?versionId=${v.id}`)
+        .then((r) => r.json())
+        .then((tickets: Ticket[]) =>
+          setVersionTickets((prev) => ({ ...prev, [v.id]: tickets }))
+        )
+        .catch(() => {});
+    });
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [versions, id]);
+
+  async function handleApprove(versionId: string) {
+    setApproving(versionId);
+    try {
+      const res = await fetch(`/api/clients/${id}/versions/${versionId}/approve`, { method: "POST" });
+      if (!res.ok) throw new Error("Erro ao aprovar versão");
+      await load();
+      showToast({ type: "success", message: "Versão aprovada e ativada." });
+    } catch (err) {
+      showToast({ type: "error", message: err instanceof Error ? err.message : "Erro ao aprovar" });
+    } finally {
+      setApproving(null);
+    }
+  }
+
+  async function handleReturn() {
+    if (!returnModal || !returnFeedback.trim()) return;
+    setReturning(true);
+    try {
+      const res = await fetch(`/api/clients/${id}/versions/${returnModal.id}/return`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ feedback: returnFeedback }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error ?? "Erro ao devolver");
+      setReturnModal(null);
+      setReturnFeedback("");
+      await load();
+      showToast({
+        type: "success",
+        message: `Nova versão criada — ${data.issueCount} problema${data.issueCount !== 1 ? "s" : ""} corrigido${data.issueCount !== 1 ? "s" : ""}.`,
+      });
+    } catch (err) {
+      showToast({ type: "error", message: err instanceof Error ? err.message : "Erro ao devolver" });
+    } finally {
+      setReturning(false);
+    }
+  }
+
+  // Fechar modais com Escape
+  useEffect(() => {
+    const h = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        if (diffVersion) setDiffVersion(null);
+        if (returnModal) { setReturnModal(null); setReturnFeedback(""); }
+      }
+    };
     window.addEventListener("keydown", h);
     return () => window.removeEventListener("keydown", h);
-  }, [diffVersion]);
+  }, [diffVersion, returnModal]);
 
   async function handleActivate(versionId: string) {
     setActivating(versionId);
@@ -174,112 +250,246 @@ export default function VersionsPage() {
         </p>
 
         <div className="space-y-2">
-          {versions.map((v, i) => (
-            <div
-              key={v.id}
-              style={{ animationDelay: `${i * 30}ms` }}
-              className={`animate-fade-up card px-4 py-3.5 ${
-                v.isActive ? "border-[var(--accent)]/40" : ""
-              }`}
-            >
-              <div className="flex items-start justify-between gap-4">
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-2 mb-1">
-                    <span className="text-[13px] font-semibold text-[var(--text-primary)] tabular-nums">
-                      Versão {v.version}
-                    </span>
-                    {v.isActive && (
-                      <span className="text-[11px] bg-[var(--accent-subtle)] text-[var(--accent-text)] px-2 py-0.5 rounded-full font-medium">
-                        Ativa
+          {versions.map((v, i) => {
+            const isPending = v.status === "PENDING_REVIEW";
+            const tickets   = versionTickets[v.id] ?? [];
+            return (
+              <div
+                key={v.id}
+                style={{ animationDelay: `${i * 30}ms` }}
+                className={`animate-fade-up card px-4 py-3.5 ${
+                  isPending
+                    ? "border-amber-500/40 bg-amber-500/[0.03]"
+                    : v.isActive
+                    ? "border-[var(--accent)]/40"
+                    : ""
+                }`}
+              >
+                <div className="flex items-start justify-between gap-4">
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2 mb-1">
+                      <span className="text-[13px] font-semibold text-[var(--text-primary)] tabular-nums">
+                        Versão {v.version}
                       </span>
+                      {isPending && (
+                        <span className="text-[11px] bg-amber-500/10 text-amber-400 px-2 py-0.5 rounded-full font-medium">
+                          Aguardando revisão
+                        </span>
+                      )}
+                      {v.isActive && !isPending && (
+                        <span className="text-[11px] bg-[var(--accent-subtle)] text-[var(--accent-text)] px-2 py-0.5 rounded-full font-medium">
+                          Ativa
+                        </span>
+                      )}
+                      <span className="text-[11px] text-[var(--text-disabled)]">
+                        {v.generatedBy === "AI" ? "Gerada por IA" : "Edição manual"}
+                      </span>
+                    </div>
+                    <p className="text-[11px] text-[var(--text-muted)] tabular-nums mb-1">
+                      {formatDate(v.createdAt)}
+                    </p>
+                    {v.changesSummary && (
+                      <p className="text-[12px] text-[var(--text-secondary)] truncate">{v.changesSummary}</p>
                     )}
-                    <span className="text-[11px] text-[var(--text-disabled)]">
-                      {v.generatedBy === "AI" ? "Gerada por IA" : "Edição manual"}
-                    </span>
+                    {v.problemDescription && (
+                      <p className="text-[11px] text-[var(--text-disabled)] mt-0.5 truncate">
+                        Problema: {v.problemDescription}
+                      </p>
+                    )}
+                    <p className="text-[11px] text-[var(--text-disabled)] mt-0.5 tabular-nums">
+                      {v._count.modules} módulos
+                    </p>
                   </div>
-                  <p className="text-[11px] text-[var(--text-muted)] tabular-nums mb-1">
-                    {formatDate(v.createdAt)}
-                  </p>
-                  {v.changesSummary && (
-                    <p className="text-[12px] text-[var(--text-secondary)] truncate">{v.changesSummary}</p>
-                  )}
-                  <p className="text-[11px] text-[var(--text-disabled)] mt-0.5 tabular-nums">
-                    {v._count.modules} módulos
-                  </p>
-                </div>
 
-                <div className="flex items-center gap-1.5 shrink-0">
-                  {/* Copiar */}
-                  <button
-                    onClick={() => handleCopy(v)}
-                    className={`press flex items-center gap-1.5 text-[12px] px-3 py-1.5 rounded-md border transition-all duration-150 ${
-                      copiedId === v.id
-                        ? "border-emerald-500/30 bg-emerald-500/5 text-emerald-400"
-                        : "border-[var(--surface-border)] text-[var(--text-muted)] hover:text-[var(--text-secondary)] hover:border-[var(--accent)]/30"
-                    }`}
-                  >
-                    {copiedId === v.id ? <Check size={12} /> : <Copy size={12} />}
-                    {copiedId === v.id ? "Copiado" : "Copiar"}
-                  </button>
-
-                  {/* Diff */}
-                  {v.version > 1 && (
+                  <div className="flex items-center gap-1.5 shrink-0">
+                    {/* Copiar */}
                     <button
-                      onClick={() => setDiffVersion(v)}
-                      className="press flex items-center gap-1.5 text-[12px] text-[var(--text-muted)] hover:text-[var(--text-secondary)] px-3 py-1.5 border border-[var(--surface-border)] hover:border-[var(--accent)]/30 rounded-md transition-all duration-150"
+                      onClick={() => handleCopy(v)}
+                      className={`press flex items-center gap-1.5 text-[12px] px-3 py-1.5 rounded-md border transition-all duration-150 ${
+                        copiedId === v.id
+                          ? "border-emerald-500/30 bg-emerald-500/5 text-emerald-400"
+                          : "border-[var(--surface-border)] text-[var(--text-muted)] hover:text-[var(--text-secondary)] hover:border-[var(--accent)]/30"
+                      }`}
                     >
-                      <GitCompare size={12} />
-                      Diff
+                      {copiedId === v.id ? <Check size={12} /> : <Copy size={12} />}
+                      {copiedId === v.id ? "Copiado" : "Copiar"}
                     </button>
-                  )}
 
-                  {/* Exportar */}
-                  <button
-                    onClick={() => handleExport(v)}
-                    className="press flex items-center gap-1.5 text-[12px] text-[var(--text-muted)] hover:text-[var(--text-secondary)] px-3 py-1.5 border border-[var(--surface-border)] hover:border-[var(--accent)]/30 rounded-md transition-all duration-150"
-                    title="Exportar como .txt"
-                  >
-                    <Download size={12} />
-                    .txt
-                  </button>
-
-                  {/* Ativar — com confirmação */}
-                  {!v.isActive && (
-                    confirmActivate === v.id ? (
-                      <div className="flex items-center gap-1.5">
-                        <span className="text-[11px] text-[var(--text-secondary)]">Confirmar?</span>
-                        <button
-                          onClick={() => handleActivate(v.id)}
-                          disabled={activating === v.id}
-                          className="press text-[12px] font-medium text-white bg-[var(--accent)] hover:bg-[var(--accent-hover)] px-3 py-1.5 rounded-md transition-colors disabled:opacity-50"
-                        >
-                          {activating === v.id ? (
-                            <span className="w-3 h-3 border-2 border-white/30 border-t-white rounded-full animate-spin inline-block" />
-                          ) : "Sim"}
-                        </button>
-                        <button
-                          onClick={() => setConfirmActivate(null)}
-                          disabled={activating === v.id}
-                          className="press text-[12px] text-[var(--text-muted)] hover:text-[var(--text-secondary)] px-2 py-1.5 rounded-md transition-colors"
-                        >
-                          Não
-                        </button>
-                      </div>
-                    ) : (
+                    {/* Diff */}
+                    {v.version > 1 && (
                       <button
-                        onClick={() => setConfirmActivate(v.id)}
-                        className="press text-[12px] text-[var(--text-muted)] hover:text-[var(--text-secondary)] bg-[var(--surface-raised)] hover:bg-[var(--surface-border)] border border-[var(--surface-border)] px-3 py-1.5 rounded-md transition-all duration-150"
+                        onClick={() => setDiffVersion(v)}
+                        className="press flex items-center gap-1.5 text-[12px] text-[var(--text-muted)] hover:text-[var(--text-secondary)] px-3 py-1.5 border border-[var(--surface-border)] hover:border-[var(--accent)]/30 rounded-md transition-all duration-150"
                       >
-                        Ativar
+                        <GitCompare size={12} />
+                        Diff
                       </button>
-                    )
-                  )}
+                    )}
+
+                    {/* Exportar */}
+                    <button
+                      onClick={() => handleExport(v)}
+                      className="press flex items-center gap-1.5 text-[12px] text-[var(--text-muted)] hover:text-[var(--text-secondary)] px-3 py-1.5 border border-[var(--surface-border)] hover:border-[var(--accent)]/30 rounded-md transition-all duration-150"
+                      title="Exportar como .txt"
+                    >
+                      <Download size={12} />
+                      .txt
+                    </button>
+
+                    {/* Pipeline: Aprovar / Devolver */}
+                    {isPending && (
+                      <>
+                        <button
+                          onClick={() => { setReturnModal(v); setReturnFeedback(""); }}
+                          className="press flex items-center gap-1.5 text-[12px] text-[var(--text-muted)] hover:text-[var(--text-secondary)] bg-[var(--surface-raised)] hover:bg-[var(--surface-border)] border border-[var(--surface-border)] px-3 py-1.5 rounded-md transition-all duration-150"
+                        >
+                          <RotateCcw size={12} />
+                          Devolver
+                        </button>
+                        <button
+                          onClick={() => handleApprove(v.id)}
+                          disabled={approving === v.id}
+                          className="press flex items-center gap-1.5 text-[12px] font-medium text-white bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 px-3 py-1.5 rounded-md transition-colors"
+                        >
+                          {approving === v.id ? (
+                            <span className="w-3 h-3 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                          ) : (
+                            <CheckCircle size={12} />
+                          )}
+                          Aprovar
+                        </button>
+                      </>
+                    )}
+
+                    {/* Ativar versão anterior — com confirmação */}
+                    {!v.isActive && !isPending && (
+                      confirmActivate === v.id ? (
+                        <div className="flex items-center gap-1.5">
+                          <span className="text-[11px] text-[var(--text-secondary)]">Confirmar?</span>
+                          <button
+                            onClick={() => handleActivate(v.id)}
+                            disabled={activating === v.id}
+                            className="press text-[12px] font-medium text-white bg-[var(--accent)] hover:bg-[var(--accent-hover)] px-3 py-1.5 rounded-md transition-colors disabled:opacity-50"
+                          >
+                            {activating === v.id ? (
+                              <span className="w-3 h-3 border-2 border-white/30 border-t-white rounded-full animate-spin inline-block" />
+                            ) : "Sim"}
+                          </button>
+                          <button
+                            onClick={() => setConfirmActivate(null)}
+                            disabled={activating === v.id}
+                            className="press text-[12px] text-[var(--text-muted)] hover:text-[var(--text-secondary)] px-2 py-1.5 rounded-md transition-colors"
+                          >
+                            Não
+                          </button>
+                        </div>
+                      ) : (
+                        <button
+                          onClick={() => setConfirmActivate(v.id)}
+                          className="press text-[12px] text-[var(--text-muted)] hover:text-[var(--text-secondary)] bg-[var(--surface-raised)] hover:bg-[var(--surface-border)] border border-[var(--surface-border)] px-3 py-1.5 rounded-md transition-all duration-150"
+                        >
+                          Ativar
+                        </button>
+                      )
+                    )}
+                  </div>
                 </div>
+
+                {/* Tickets da versão PENDING_REVIEW */}
+                {isPending && tickets.length > 0 && (
+                  <div className="mt-3 pt-3 border-t border-amber-500/20 space-y-2">
+                    <p className="text-[11px] font-medium text-amber-400 uppercase tracking-[0.1em]">
+                      Problemas corrigidos pelo pipeline
+                    </p>
+                    {tickets.map((t) => (
+                      <div key={t.id} className="flex items-start gap-2">
+                        <span className={`text-[10px] px-1.5 py-0.5 rounded font-medium shrink-0 mt-0.5 ${
+                          t.priority === "CRITICAL"
+                            ? "bg-red-500/10 text-red-400"
+                            : t.priority === "IMPROVEMENT"
+                            ? "bg-blue-500/10 text-blue-400"
+                            : "bg-[var(--accent-subtle)] text-[var(--accent-text)]"
+                        }`}>
+                          {t.priority === "CRITICAL" ? "CRÍTICO" : t.priority === "IMPROVEMENT" ? "MELHORIA" : "NORMAL"}
+                        </span>
+                        <div className="flex-1 min-w-0">
+                          <p className="text-[12px] text-[var(--text-secondary)]">{t.description}</p>
+                          {t.affectedModule && (
+                            <p className="text-[11px] text-[var(--text-disabled)]">
+                              Módulo: {MODULE_LABELS[t.affectedModule] ?? t.affectedModule}
+                            </p>
+                          )}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
               </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
       </div>
+
+      {/* Modal de devolução */}
+      {returnModal && (
+        <div
+          className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 animate-fade-in"
+          onClick={(e) => { if (e.target === e.currentTarget) { setReturnModal(null); setReturnFeedback(""); } }}
+        >
+          <div className="bg-[var(--surface)] border border-[var(--surface-border)] rounded-xl w-full max-w-lg shadow-2xl animate-fade-up">
+            <div className="flex items-center justify-between px-5 py-4 border-b border-[var(--surface-border)]">
+              <div>
+                <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-[var(--text-disabled)] mb-0.5">
+                  Devolver para o pipeline
+                </p>
+                <h2 className="text-[14px] font-semibold text-[var(--text-primary)]">
+                  Versão {returnModal.version} — descreva o que ainda falta
+                </h2>
+              </div>
+              <button
+                onClick={() => { setReturnModal(null); setReturnFeedback(""); }}
+                className="press text-[var(--text-muted)] hover:text-[var(--text-primary)] p-1.5 rounded-md hover:bg-[var(--surface-raised)] transition-all"
+              >
+                <X size={14} />
+              </button>
+            </div>
+
+            <div className="p-5 space-y-4">
+              <textarea
+                value={returnFeedback}
+                onChange={(e) => setReturnFeedback(e.target.value)}
+                rows={5}
+                placeholder="Ex: Sofia ainda está respondendo em terceira pessoa mesmo após a correção..."
+                className="w-full bg-[var(--surface-raised)] border border-[var(--surface-border)] text-[var(--text-primary)] text-[12px] rounded-md px-3 py-2.5 resize-none focus:outline-none focus:border-[var(--accent)] placeholder:text-[var(--text-disabled)] leading-relaxed transition-colors"
+              />
+              <p className="text-[11px] text-[var(--text-muted)]">
+                O pipeline vai combinar este feedback com o problema original e criar uma nova versão para revisão.
+              </p>
+            </div>
+
+            <div className="flex items-center justify-end gap-2 px-5 py-4 border-t border-[var(--surface-border)]">
+              <button
+                onClick={() => { setReturnModal(null); setReturnFeedback(""); }}
+                className="press text-[13px] text-[var(--text-muted)] hover:text-[var(--text-secondary)] px-4 py-2 transition-colors"
+              >
+                Cancelar
+              </button>
+              <button
+                onClick={handleReturn}
+                disabled={returning || !returnFeedback.trim()}
+                className="press flex items-center gap-1.5 bg-amber-600 hover:bg-amber-500 disabled:opacity-50 text-white text-[13px] font-medium px-5 py-2 rounded-md transition-colors duration-150"
+              >
+                {returning ? (
+                  <span className="w-3 h-3 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                ) : (
+                  <RotateCcw size={13} />
+                )}
+                {returning ? "Rodando pipeline..." : "Devolver ao pipeline"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Modal de diff */}
       {diffVersion && (

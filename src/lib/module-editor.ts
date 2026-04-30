@@ -4,7 +4,9 @@ import { MODULE_LABELS } from "@/lib/prompt-constants";
 import { logUsage } from "@/lib/usage-logger";
 import { SOFIA_GUIDELINES_CONDENSED } from "@/lib/sofia-guidelines";
 
-const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
+function getAnthropic() {
+  return new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
+}
 
 // Descrição funcional de cada módulo — guia a IA na sugestão de melhoria
 const MODULE_DESCRIPTIONS: Record<ModuleKey, string> = {
@@ -65,7 +67,7 @@ Sugira uma versão melhorada deste módulo. Siga rigorosamente as diretrizes aci
 Mantenha todas as informações corretas da clínica. Responda APENAS com o conteúdo do módulo — sem comentários, sem cabeçalho, sem ###MÓDULO###.`;
 
   // Haiku: suficiente para sugestões focadas, ~25x mais barato que Sonnet
-  const message = await anthropic.messages.create({
+  const message = await getAnthropic().messages.create({
     model: "claude-haiku-4-5-20251001",
     max_tokens: 2048,
     messages: [{ role: "user", content: prompt }],
@@ -110,7 +112,7 @@ Com base no problema reportado, sugira uma versão corrigida deste módulo que r
 Responda APENAS com o conteúdo corrigido do módulo — sem comentários, sem cabeçalho, sem ###MÓDULO###.`;
 
   // Haiku: suficiente para correções focadas de módulo, ~25x mais barato que Sonnet
-  const message = await anthropic.messages.create({
+  const message = await getAnthropic().messages.create({
     model: "claude-haiku-4-5-20251001",
     max_tokens: 2048,
     messages: [{ role: "user", content: prompt }],

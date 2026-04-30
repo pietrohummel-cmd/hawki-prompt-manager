@@ -6,7 +6,9 @@ import { SOFIA_GUIDELINES_CONDENSED } from "@/lib/sofia-guidelines";
 
 export { MODULE_LABELS, MODULE_ORDER } from "@/lib/prompt-constants";
 
-const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
+function getAnthropic() {
+  return new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
+}
 
 export function buildClientContext(client: Client): string {
   const lines: string[] = [];
@@ -297,7 +299,7 @@ FORMATO DE SAÍDA OBRIGATÓRIO — use EXATAMENTE esta estrutura e esta ordem:
 PROMPT ORIGINAL A REORGANIZAR:
 ${rawText}`;
 
-  const message = await anthropic.messages.create({
+  const message = await getAnthropic().messages.create({
     model: "claude-sonnet-4-6",
     max_tokens: 8192,
     messages: [{ role: "user", content: prompt }],
@@ -322,7 +324,7 @@ export async function generateClientPrompt(client: Client): Promise<{
 }> {
   const systemPrompt = buildSystemPromptForGeneration(client);
 
-  const message = await anthropic.messages.create({
+  const message = await getAnthropic().messages.create({
     model: "claude-sonnet-4-6",
     max_tokens: 8192,
     messages: [
