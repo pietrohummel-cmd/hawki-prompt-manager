@@ -2,8 +2,9 @@
 
 import { useEffect, useState, useCallback } from "react";
 import { useParams } from "next/navigation";
+import Link from "next/link";
 import {
-  RefreshCw, Upload, ChevronDown, ChevronUp, Pencil, Sparkles, X,
+  RefreshCw, Upload, ChevronDown, ChevronUp, Pencil, Sparkles, X, ArrowRight,
 } from "lucide-react";
 import { MODULE_LABELS, MODULE_ORDER } from "@/lib/prompt-constants";
 import type { ModuleKey } from "@/generated/prisma";
@@ -21,6 +22,7 @@ interface PromptVersion {
   id: string;
   version: number;
   isActive: boolean;
+  status: "PENDING_REVIEW" | "ACTIVE" | "ARCHIVED";
   generatedBy: string;
   createdAt: string;
   modules: PromptModule[];
@@ -43,6 +45,7 @@ export default function PromptPage() {
 
   const [client, setClient]               = useState<ClientData | null>(null);
   const [activeVersion, setActiveVersion] = useState<PromptVersion | null>(null);
+  const [pendingVersion, setPendingVersion] = useState<PromptVersion | null>(null);
   const [loading, setLoading]             = useState(true);
   const [generating, setGenerating]       = useState(false);
   const [error, setError]                 = useState<string | null>(null);
@@ -70,8 +73,10 @@ export default function PromptPage() {
       if (!res.ok) throw new Error("Erro ao carregar cliente");
       const data: ClientData = await res.json();
       setClient(data);
-      const active = data.promptVersions.find((v) => v.isActive) ?? data.promptVersions[0] ?? null;
-      setActiveVersion(active);
+      const active  = data.promptVersions.find((v) => v.isActive) ?? null;
+      const pending = data.promptVersions.find((v) => v.status === "PENDING_REVIEW") ?? null;
+      setActiveVersion(active ?? data.promptVersions[0] ?? null);
+      setPendingVersion(pending);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Erro desconhecido");
     } finally {
@@ -259,6 +264,24 @@ export default function PromptPage() {
         </div>
       </div>
 
+      {/* Banner: versão aguardando revisão */}
+      {pendingVersion && (
+        <Link
+          href={`/clients/${id}/versions`}
+          className="flex items-center justify-between gap-3 bg-amber-500/10 border border-amber-500/30 text-amber-400 text-[13px] px-4 py-3 rounded-lg mb-5 hover:bg-amber-500/15 transition-colors group"
+        >
+          <div className="flex items-center gap-2.5">
+            <span className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-pulse shrink-0" />
+            <span>
+              Versão {pendingVersion.version} gerada pelo pipeline está aguardando sua revisão.
+            </span>
+          </div>
+          <span className="flex items-center gap-1 text-[12px] font-medium shrink-0 group-hover:gap-1.5 transition-all">
+            Revisar agora <ArrowRight size={12} />
+          </span>
+        </Link>
+      )}
+
       {error && (
         <div className="bg-red-500/10 border border-red-500/30 text-red-400 text-[13px] px-4 py-3 rounded-lg mb-5">
           {error}
@@ -286,14 +309,35 @@ export default function PromptPage() {
       )}
 
       {!activeVersion && !generating && (
-        <div className="card p-12 text-center">
-          <div className="w-10 h-10 rounded-xl bg-[var(--accent-subtle)] flex items-center justify-center mx-auto mb-4">
-            <Sparkles size={18} className="text-[var(--accent)]" />
+        <div className="card p-8">
+          <div className="flex items-center gap-3 mb-6">
+            <div className="w-8 h-8 rounded-lg bg-[var(--accent-subtle)] flex items-center justify-center shrink-0">
+              <Sparkles size={15} className="text-[var(--accent)]" />
+            </div>
+            <div>
+              <p className="text-[13px] font-semibold text-[var(--text-primary)]">Nenhum prompt gerado</p>
+              <p className="text-[12px] text-[var(--text-muted)]">Siga os passos abaixo para colocar este cliente em produção</p>
+            </div>
           </div>
-          <p className="text-[var(--text-secondary)] text-[13px] mb-1">Nenhum prompt gerado ainda.</p>
-          <p className="text-[var(--text-disabled)] text-[12px]">
-            Clique em "Gerar prompt" para criar a primeira versão com IA.
-          </p>
+
+          <div className="space-y-3">
+            {[
+              { step: "1", label: "Gerar o primeiro prompt", detail: 'Clique em "Gerar prompt" — a IA cria os 10 módulos com base no perfil do cliente.', done: false, action: true },
+              { step: "2", label: "Simular conversas", detail: "Na aba Simulação, teste como a Sofia responde. Identifique comportamentos incorretos.", done: false },
+              { step: "3", label: "Corrigir problemas encontrados", detail: 'Na aba Prompt, clique em "Importar" — cole o prompt e descreva o problema. O pipeline corrige e gera uma nova versão.', done: false },
+              { step: "4", label: "Revisar e aprovar a versão corrigida", detail: "Na aba Versões, veja cada correção feita pelo pipeline e aprove ou devolva com feedback.", done: false },
+            ].map(({ step, label, detail }) => (
+              <div key={step} className="flex items-start gap-4 px-4 py-3 rounded-lg border border-[var(--surface-border)] bg-[var(--surface-raised)]">
+                <span className="w-6 h-6 rounded-full bg-[var(--surface-border)] flex items-center justify-center text-[11px] font-semibold text-[var(--text-disabled)] shrink-0 mt-0.5">
+                  {step}
+                </span>
+                <div>
+                  <p className="text-[13px] font-medium text-[var(--text-secondary)]">{label}</p>
+                  <p className="text-[12px] text-[var(--text-disabled)] mt-0.5 leading-relaxed">{detail}</p>
+                </div>
+              </div>
+            ))}
+          </div>
         </div>
       )}
 

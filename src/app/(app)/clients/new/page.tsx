@@ -188,6 +188,10 @@ export default function NewClientPage() {
       }
 
       const client = await res.json();
+
+      // Gera o primeiro prompt automaticamente — sem etapa extra para o usuário
+      await fetch(`/api/clients/${client.id}/generate-prompt`, { method: "POST" });
+
       router.push(`/clients/${client.id}/prompt`);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Erro desconhecido");
@@ -501,7 +505,7 @@ export default function NewClientPage() {
             disabled={saving}
             className="press bg-[var(--accent)] hover:bg-[var(--accent-hover)] disabled:opacity-50 text-white font-medium text-sm px-6 py-2.5 rounded-md transition-colors"
           >
-            {saving ? "Salvando..." : "Salvar e gerar prompt →"}
+            {saving ? "Criando e gerando prompt..." : "Salvar e gerar prompt →"}
           </button>
           <button
             type="button"
