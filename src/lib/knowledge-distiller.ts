@@ -1,12 +1,14 @@
 /**
  * Destilação de SpecialtyKnowledge a partir de interações aprovadas.
  *
- * Fluxo:
+ * Fluxo (Slice 0.1 — batch atômico):
  * 1. Busca as top-20 interações APPROVED para a categoria (ordenadas por scoreQuality desc)
  * 2. Envia as transcrições ao claude-sonnet para extrair 3–5 insights acionáveis
- * 3. Arquiva os insights ACTIVE anteriores da categoria
- * 4. Cria os novos insights como DRAFT (admin ativa via painel no Slice 4)
- * 5. Retorna os insights criados
+ * 3. Arquiva os DRAFT batches anteriores da mesma categoria (não toca em ACTIVE)
+ * 4. Cria um novo KnowledgeBatch (status=DRAFT) + todos os insights linkados a ele
+ * 5. Admin ativa via PATCH /api/intelligence/knowledge/batches/[batchId] (atomicamente)
+ *
+ * ACTIVE permanece intocado até a ativação explícita do novo batch — sem janela de zero-knowledge.
  */
 
 import Anthropic from "@anthropic-ai/sdk";
@@ -85,14 +87,16 @@ Responda APENAS com JSON válido:
 
 export interface DistillResult {
   category: ServiceCategory;
+  batchId: string | null;
   sourceCount: number;
   insightsCreated: number;
-  insightsArchived: number;
+  draftBatchesArchived: number;
 }
 
 /**
  * Destila conhecimento para uma categoria a partir das interações aprovadas.
- * Arquiva insights ACTIVE anteriores e cria novos como DRAFT.
+ * Cria um novo KnowledgeBatch DRAFT com todos os insights extraídos.
+ * Arquiva DRAFTs anteriores (não toca em ACTIVE — promoção é atômica via batch endpoint).
  */
 export async function distillKnowledge(category: ServiceCategory): Promise<DistillResult> {
   // 1 — Busca top-20 aprovadas, priorizando as com maior scoreQuality
@@ -106,7 +110,7 @@ export async function distillKnowledge(category: ServiceCategory): Promise<Disti
   });
 
   if (interactions.length === 0) {
-    return { category, sourceCount: 0, insightsCreated: 0, insightsArchived: 0 };
+    return { category, batchId: null, sourceCount: 0, insightsCreated: 0, draftBatchesArchived: 0 };
   }
 
   // 2 — Extrai insights via LLM
@@ -116,35 +120,51 @@ export async function distillKnowledge(category: ServiceCategory): Promise<Disti
   );
 
   if (rawInsights.length === 0) {
-    return { category, sourceCount: interactions.length, insightsCreated: 0, insightsArchived: 0 };
+    return { category, batchId: null, sourceCount: interactions.length, insightsCreated: 0, draftBatchesArchived: 0 };
   }
 
-  // 3 — Arquiva DRAFT anteriores da categoria (gerados por destilações passadas não aprovadas)
-  //     Não toca nos ACTIVE — eles continuam injetados até a ativação explícita do novo batch.
-  //     A promoção DRAFT→ACTIVE e o arquivamento dos ACTIVE anteriores acontece de forma
-  //     atômica no painel de SpecialtyKnowledge (Slice 4), não aqui.
-  const { count: draftsArchived } = await prisma.specialtyKnowledge.updateMany({
-    where: { category, status: "DRAFT" },
-    data: { status: "ARCHIVED" },
-  });
+  // 3 — Cria batch + insights em transação atômica
+  //     Arquiva DRAFTs anteriores e seus insights antes (não toca em ACTIVE).
+  const result = await prisma.$transaction(async (tx) => {
+    // 3a — Arquiva DRAFT batches anteriores da categoria (cascateia para insights via status no UI)
+    const archivedBatches = await tx.knowledgeBatch.updateMany({
+      where: { category, status: "DRAFT" },
+      data: { status: "ARCHIVED", archivedAt: new Date() },
+    });
+    // Também arquiva DRAFTs órfãos (legacy, sem batchId) e DRAFTs do batch arquivado
+    await tx.specialtyKnowledge.updateMany({
+      where: { category, status: "DRAFT" },
+      data: { status: "ARCHIVED" },
+    });
 
-  // 4 — Cria novos insights como DRAFT (aguardam ativação humana no Slice 4)
-  await prisma.specialtyKnowledge.createMany({
-    data: rawInsights.map((ri) => ({
-      category,
-      title: ri.title,
-      insight: ri.insight,
-      examplePhrase: ri.examplePhrase ?? null,
-      exampleResponse: ri.exampleResponse ?? null,
-      status: "DRAFT" as const,
-      sourceCount: interactions.length,
-    })),
+    // 3b — Cria novo batch DRAFT com seus insights
+    const batch = await tx.knowledgeBatch.create({
+      data: {
+        category,
+        status: "DRAFT",
+        sourceCount: interactions.length,
+        insights: {
+          create: rawInsights.map((ri) => ({
+            category,
+            title: ri.title,
+            insight: ri.insight,
+            examplePhrase: ri.examplePhrase ?? null,
+            exampleResponse: ri.exampleResponse ?? null,
+            status: "DRAFT" as const,
+            sourceCount: interactions.length,
+          })),
+        },
+      },
+    });
+
+    return { batchId: batch.id, draftBatchesArchived: archivedBatches.count };
   });
 
   return {
     category,
+    batchId: result.batchId,
     sourceCount: interactions.length,
     insightsCreated: rawInsights.length,
-    insightsArchived: draftsArchived, // apenas DRAFTs descartados, não ACTIVEs
+    draftBatchesArchived: result.draftBatchesArchived,
   };
 }

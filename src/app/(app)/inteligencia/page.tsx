@@ -23,9 +23,10 @@ interface Interaction {
 
 interface DistillResult {
   category: ServiceCategory;
+  batchId: string | null;
   sourceCount: number;
   insightsCreated: number;
-  insightsArchived: number;
+  draftBatchesArchived: number;
 }
 
 // ─── Score bar helper ─────────────────────────────────────────────────────────
@@ -515,8 +516,9 @@ export default function InteligenciaPage() {
           {distillResult?.category === filterCategory && (
             <span className="text-xs text-green-500 flex items-center gap-1">
               <Zap size={11} />
-              {distillResult.insightsCreated} insights criados a partir de {distillResult.sourceCount} conversas
-              {distillResult.insightsArchived > 0 && ` (${distillResult.insightsArchived} anteriores arquivados)`}
+              Lote criado com {distillResult.insightsCreated} insight{distillResult.insightsCreated !== 1 ? "s" : ""} a partir de {distillResult.sourceCount} conversas
+              {distillResult.draftBatchesArchived > 0 && ` (${distillResult.draftBatchesArchived} rascunho${distillResult.draftBatchesArchived !== 1 ? "s" : ""} anterior${distillResult.draftBatchesArchived !== 1 ? "es" : ""} arquivado${distillResult.draftBatchesArchived !== 1 ? "s" : ""})`}
+              {distillResult.batchId && " · ative o lote em Base de Conhecimento"}
             </span>
           )}
         </div>

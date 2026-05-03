@@ -39,6 +39,11 @@ export async function GET(request: Request) {
     const items = await prisma.specialtyKnowledge.findMany({
       where,
       orderBy: [{ status: "asc" }, { sourceCount: "desc" }, { createdAt: "desc" }],
+      include: {
+        batch: {
+          select: { id: true, status: true, createdAt: true, sourceCount: true },
+        },
+      },
     });
     return NextResponse.json(items);
   } catch (err) {

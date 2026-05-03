@@ -2,8 +2,11 @@
  * PATCH /api/intelligence/knowledge/[id]  — atualiza status ou conteúdo de um insight
  * DELETE /api/intelligence/knowledge/[id] — remove um insight (apenas DRAFT/ARCHIVED)
  *
- * Ativar um insight (DRAFT → ACTIVE) é uma operação atômica:
- * arquiva os ACTIVE anteriores da mesma categoria e promove este para ACTIVE.
+ * Insights que pertencem a um batch (distillados) não podem ser ativados individualmente
+ * — usar PATCH /api/intelligence/knowledge/batches/[batchId] para ativar o lote inteiro.
+ * Insights manuais (sem batchId) podem ser ativados individualmente; ao ativar, ACTIVEs
+ * órfãos da mesma categoria são arquivados (mas batches ACTIVE permanecem intactos —
+ * eles coexistem como camadas de conhecimento).
  */
 
 import { auth, currentUser } from "@clerk/nextjs/server";
@@ -49,35 +52,51 @@ export async function PATCH(
   const { status, ...rest } = parsed.data;
 
   try {
-    // Ativação atômica: arquiva ACTIVEs da mesma categoria antes de promover
-    if (status === "ACTIVE") {
-      const target = await prisma.specialtyKnowledge.findUnique({ where: { id } });
-      if (!target) return NextResponse.json({ error: "Insight não encontrado" }, { status: 404 });
+    const target = await prisma.specialtyKnowledge.findUnique({ where: { id } });
+    if (!target) return NextResponse.json({ error: "Insight não encontrado" }, { status: 404 });
 
+    // Ativação requer regras especiais
+    if (status === "ACTIVE") {
+      // Insights distillados (com batchId) só podem ser ativados via batch endpoint
+      if (target.batchId) {
+        return NextResponse.json(
+          {
+            error: "Insight distillado — ative o lote inteiro",
+            detail: `Use PATCH /api/intelligence/knowledge/batches/${target.batchId} para promoção atômica.`,
+            batchId: target.batchId,
+          },
+          { status: 409 }
+        );
+      }
+
+      // Insights manuais: arquiva apenas outros manuais ACTIVE (não toca em batches)
       const updated = await prisma.$transaction(async (tx) => {
-        // Arquiva todos os ACTIVE da mesma categoria (exceto o próprio)
         await tx.specialtyKnowledge.updateMany({
-          where: { category: target.category, status: "ACTIVE", id: { not: id } },
+          where: {
+            category: target.category,
+            status: "ACTIVE",
+            batchId: null,        // só toca em manuais — batches são gerenciados pelo endpoint próprio
+            id: { not: id },
+          },
           data: { status: "ARCHIVED" },
         });
-        // Promove este para ACTIVE
         return tx.specialtyKnowledge.update({
           where: { id },
           data: { status: "ACTIVE", ...rest },
         });
       });
-
       return NextResponse.json(updated);
     }
 
-    // Demais mudanças de status ou edição de conteúdo
+    // Demais mudanças (DRAFT/ARCHIVED ou edição de conteúdo) — sem efeito colateral
     const updated = await prisma.specialtyKnowledge.update({
       where: { id },
       data: { ...(status ? { status } : {}), ...rest },
     });
     return NextResponse.json(updated);
-  } catch {
-    return NextResponse.json({ error: "Insight não encontrado" }, { status: 404 });
+  } catch (err) {
+    console.error("[PATCH knowledge/:id]", err);
+    return NextResponse.json({ error: "Erro ao atualizar insight" }, { status: 500 });
   }
 }
 

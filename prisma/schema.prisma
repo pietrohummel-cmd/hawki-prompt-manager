@@ -399,6 +399,27 @@ model SuccessfulInteraction {
 }
 
 // ─────────────────────────────────────────────
+// KnowledgeBatch — lote gerado por uma destilação
+// Agrupa 3-5 insights extraídos juntos. Ativação é atômica:
+// promover um batch arquiva todos os outros ACTIVE da mesma categoria.
+// ─────────────────────────────────────────────
+
+model KnowledgeBatch {
+  id           String          @id @default(cuid())
+  category     ServiceCategory
+  status       KnowledgeStatus @default(DRAFT)
+  sourceCount  Int             @default(0)  // nº de interações que originaram o batch
+  notes        String?         @db.Text     // metadata opcional (ex: "destilação manual após calibração X")
+  createdAt    DateTime        @default(now())
+  activatedAt  DateTime?
+  archivedAt   DateTime?
+
+  insights     SpecialtyKnowledge[]
+
+  @@index([category, status])
+}
+
+// ─────────────────────────────────────────────
 // SpecialtyKnowledge — insights destilados por categoria
 // Sem clientId: cada insight é injetado em qualquer clínica da mesma categoria.
 // ─────────────────────────────────────────────
@@ -413,10 +434,13 @@ model SpecialtyKnowledge {
   exampleResponse String?         @db.Text   // resposta modelo da Sofia
   status          KnowledgeStatus @default(DRAFT)
   sourceCount     Int             @default(0) // nº de interações que originaram este insight
+  batchId         String?                     // null = insight manual; preenchido = veio de destilação
+  batch           KnowledgeBatch? @relation(fields: [batchId], references: [id], onDelete: Cascade)
   createdAt       DateTime        @default(now())
   updatedAt       DateTime        @updatedAt
 
   @@index([category, status])
+  @@index([batchId])
 }
 
 // ─────────────────────────────────────────────
