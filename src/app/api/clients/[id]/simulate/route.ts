@@ -6,7 +6,7 @@ import { prisma } from "@/lib/prisma";
 import { MODULE_ORDER } from "@/lib/prompt-constants";
 import type { ModuleKey } from "@/generated/prisma";
 
-const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
+const anthropic = new Anthropic({ apiKey: process.env.HAWKI_ANTHROPIC_API_KEY });
 
 const schema = z.object({
   message: z.string().min(1),

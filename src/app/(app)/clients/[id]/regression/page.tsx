@@ -48,6 +48,16 @@ export default function RegressionPage() {
   const [runningAll, setRunningAll] = useState(false);
   const [activeRun, setActiveRun] = useState<{ caseId: string; run: RegressionRun } | null>(null);
 
+  // Correção a partir de caso
+  const [fixing, setFixing] = useState(false);
+  const [fixResult, setFixResult] = useState<{
+    versionId: string;
+    issueCount: number;
+    regressionTotal: number;
+    regressionPassed: number;
+    caseRerun: { status: string; results: { criterion: string; passed: boolean | null }[] } | null;
+  } | null>(null);
+
   const load = useCallback(async () => {
     try {
       const res = await fetch(`/api/clients/${id}/regression`);
@@ -131,6 +141,7 @@ export default function RegressionPage() {
 
   async function handleRun(regressionCase: RegressionCase) {
     setRunningCase(regressionCase.id);
+    setFixResult(null);
     try {
       const res = await fetch(`/api/clients/${id}/regression/${regressionCase.id}/run`, { method: "POST" });
       const data = await res.json();
@@ -141,6 +152,23 @@ export default function RegressionPage() {
       alert(err instanceof Error ? err.message : "Erro ao rodar caso");
     } finally {
       setRunningCase(null);
+    }
+  }
+
+  async function handleFixFromCase(caseId: string) {
+    setFixing(true);
+    setFixResult(null);
+    try {
+      const res = await fetch(`/api/clients/${id}/regression/${caseId}/fix`, { method: "POST" });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error ?? "Erro ao corrigir");
+      setFixResult(data);
+      // Reload cases so list reflects latest runs
+      await load();
+    } catch (err) {
+      alert(err instanceof Error ? err.message : "Erro ao iniciar correção");
+    } finally {
+      setFixing(false);
     }
   }
 
@@ -250,7 +278,7 @@ export default function RegressionPage() {
                 <div className="flex items-center gap-2 shrink-0">
                   {lastRun && (
                     <button
-                      onClick={() => setActiveRun({ caseId: c.id, run: lastRun })}
+                      onClick={() => { setFixResult(null); setActiveRun({ caseId: c.id, run: lastRun }); }}
                       className="text-xs text-[var(--text-muted)] hover:text-[var(--text-secondary)] px-3 py-1.5 border border-[var(--surface-border)] rounded-md transition-colors"
                     >
                       Ver resultado
@@ -297,20 +325,20 @@ export default function RegressionPage() {
             </div>
 
             <div className="p-5 space-y-5">
-              {/* Resposta da Sofia */}
-              <div>
-                <p className="text-xs text-[var(--text-muted)] mb-2">Resposta da Sofia</p>
-                <div className="bg-[var(--surface-raised)] border border-[var(--surface-border)] rounded-lg px-4 py-3 max-h-48 overflow-y-auto">
-                  <p className="text-sm text-[var(--text-primary)] whitespace-pre-wrap leading-relaxed">{activeRun.run.response}</p>
-                </div>
-              </div>
-
               {/* Input original */}
               <div>
                 <p className="text-xs text-[var(--text-muted)] mb-2">Mensagem enviada</p>
                 <p className="text-sm text-[var(--text-secondary)] bg-[var(--surface-raised)] rounded-lg px-4 py-3">
                   {cases.find((c) => c.id === activeRun.caseId)?.input}
                 </p>
+              </div>
+
+              {/* Resposta da Sofia */}
+              <div>
+                <p className="text-xs text-[var(--text-muted)] mb-2">Resposta da Sofia</p>
+                <div className="bg-[var(--surface-raised)] border border-[var(--surface-border)] rounded-lg px-4 py-3 max-h-48 overflow-y-auto">
+                  <p className="text-sm text-[var(--text-primary)] whitespace-pre-wrap leading-relaxed">{activeRun.run.response}</p>
+                </div>
               </div>
 
               {/* Resposta ideal (se definida) */}
@@ -347,8 +375,66 @@ export default function RegressionPage() {
               </div>
             </div>
 
-            <div className="flex items-center justify-end px-5 py-4 border-t border-[var(--surface-border)]">
-              <button onClick={() => setActiveRun(null)} className="text-sm text-[var(--text-muted)] hover:text-[var(--text-secondary)] px-4 py-2">Fechar</button>
+            {/* Fix result inline */}
+            {fixResult && (
+              <div className="px-5 pb-2">
+                <div className={`rounded-lg border px-4 py-3 text-sm space-y-2 ${
+                  fixResult.caseRerun?.status === "PASSED"
+                    ? "bg-emerald-500/10 border-emerald-500/30"
+                    : "bg-amber-500/10 border-amber-500/30"
+                }`}>
+                  <p className={`font-medium ${fixResult.caseRerun?.status === "PASSED" ? "text-emerald-400" : "text-amber-400"}`}>
+                    {fixResult.caseRerun?.status === "PASSED"
+                      ? "✓ Correção aplicada — caso passou na nova versão!"
+                      : "⚠ Versão gerada, mas o caso ainda não passou totalmente"}
+                  </p>
+                  <p className="text-xs text-[var(--text-muted)]">
+                    {fixResult.issueCount} problema{fixResult.issueCount !== 1 ? "s" : ""} identificado{fixResult.issueCount !== 1 ? "s" : ""} e corrigido{fixResult.issueCount !== 1 ? "s" : ""} pelo pipeline.
+                    {fixResult.regressionTotal > 0 && (
+                      <> Regressão geral: {fixResult.regressionPassed}/{fixResult.regressionTotal} casos passaram.</>
+                    )}
+                  </p>
+                  {fixResult.caseRerun && (
+                    <div className="space-y-1 pt-1">
+                      {fixResult.caseRerun.results.map((r) => (
+                        <div key={r.criterion} className="flex items-center gap-2 text-xs">
+                          <span className={r.passed ? "text-emerald-400" : "text-red-400"}>{r.passed ? "✓" : "✗"}</span>
+                          <span className="text-[var(--text-secondary)]">{r.criterion}</span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                  <a
+                    href={`/clients/${id}/versions`}
+                    className="inline-block mt-1 text-xs underline text-[var(--text-muted)] hover:text-[var(--text-secondary)]"
+                  >
+                    Revisar versão gerada →
+                  </a>
+                </div>
+              </div>
+            )}
+
+            <div className="flex items-center justify-between px-5 py-4 border-t border-[var(--surface-border)]">
+              {/* Fix button — only for failed runs with expected response */}
+              {activeRun.run.status === "FAILED" &&
+               cases.find((c) => c.id === activeRun.caseId)?.expectedResponse && (
+                <button
+                  onClick={() => handleFixFromCase(activeRun.caseId)}
+                  disabled={fixing}
+                  className="flex items-center gap-2 text-sm bg-amber-500/10 hover:bg-amber-500/20 border border-amber-500/30 text-amber-400 px-4 py-2 rounded-md transition-colors disabled:opacity-50"
+                >
+                  {fixing ? (
+                    <><span className="animate-spin inline-block w-3 h-3 border-2 border-amber-500/30 border-t-amber-400 rounded-full" />Corrigindo...</>
+                  ) : "✦ Corrigir a partir desse caso"}
+                </button>
+              )}
+              {activeRun.run.status === "FAILED" && !cases.find((c) => c.id === activeRun.caseId)?.expectedResponse && (
+                <p className="text-xs text-[var(--text-muted)]">
+                  Adicione uma <span className="text-amber-400/80">resposta ideal</span> ao caso para habilitar a correção automática.
+                </p>
+              )}
+              {activeRun.run.status !== "FAILED" && <span />}
+              <button onClick={() => { setActiveRun(null); setFixResult(null); }} className="text-sm text-[var(--text-muted)] hover:text-[var(--text-secondary)] px-4 py-2">Fechar</button>
             </div>
           </div>
         </div>
@@ -385,6 +471,30 @@ export default function RegressionPage() {
                   className="w-full bg-[var(--surface-raised)] border border-[var(--surface-border)] text-[var(--text-primary)] text-sm rounded-md px-3 py-2.5 resize-none focus:outline-none focus:border-emerald-500 leading-relaxed"
                 />
               </div>
+              {/* Last run response — reference while writing expected response */}
+              {editingCase && editingCase.runs.length > 0 && (
+                <div>
+                  <label className="text-xs text-[var(--text-muted)] mb-2 block">
+                    Última resposta gerada pela Sofia
+                    <span className="text-[var(--text-disabled)] ml-1">(use como referência)</span>
+                  </label>
+                  <div className={`bg-[var(--surface-raised)] border rounded-md px-3 py-2.5 max-h-36 overflow-y-auto ${
+                    editingCase.runs[0].status === "FAILED"
+                      ? "border-red-500/20"
+                      : "border-[var(--surface-border)]"
+                  }`}>
+                    <p className="text-xs text-[var(--text-secondary)] whitespace-pre-wrap leading-relaxed">
+                      {editingCase.runs[0].response}
+                    </p>
+                  </div>
+                  {editingCase.runs[0].status === "FAILED" && (
+                    <p className="text-[11px] text-red-400/80 mt-1">
+                      Esta resposta falhou nos critérios. Escreva abaixo como deveria ter sido.
+                    </p>
+                  )}
+                </div>
+              )}
+
               <div>
                 <label className="text-xs text-[var(--text-muted)] mb-2 block">
                   Resposta ideal <span className="text-[var(--text-disabled)]">(opcional — usada como referência na avaliação)</span>
@@ -393,11 +503,11 @@ export default function RegressionPage() {
                   value={formExpectedResponse}
                   onChange={(e) => setFormExpectedResponse(e.target.value)}
                   rows={4}
-                  placeholder="Descreva como a Sofia deveria responder idealmente nesse cenário..."
+                  placeholder="Escreva como a Sofia deveria ter respondido nesse cenário..."
                   className="w-full bg-[var(--surface-raised)] border border-[var(--surface-border)] text-[var(--text-primary)] text-sm rounded-md px-3 py-2.5 resize-none focus:outline-none focus:border-emerald-500 leading-relaxed"
                 />
                 <p className="text-[11px] text-[var(--text-disabled)] mt-1">
-                  Exemplo de tom, estrutura e conteúdo que o avaliador vai usar como referência para julgar os critérios.
+                  Tom, estrutura e conteúdo que o avaliador vai usar como referência ao julgar os critérios.
                 </p>
               </div>
               <div>

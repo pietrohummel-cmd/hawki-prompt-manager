@@ -18,8 +18,8 @@ export async function POST(
   if (!client) return NextResponse.json({ error: "Cliente não encontrado" }, { status: 404 });
 
   try {
-    // Gera o prompt via Anthropic
-    const { systemPrompt, modules } = await generateClientPrompt(client);
+    // Gera o prompt via Anthropic (com injeção de Hawki Intelligence se disponível)
+    const { systemPrompt, modules, knowledgeInjected } = await generateClientPrompt(client);
 
     // Descobre o próximo número de versão
     const lastVersion = await prisma.promptVersion.findFirst({
@@ -86,7 +86,7 @@ export async function POST(
       regression = { total: regressionCases.length, passed, failed: regressionCases.length - passed };
     }
 
-    return NextResponse.json({ ...version, regression });
+    return NextResponse.json({ ...version, regression, knowledgeInjected });
   } catch (err) {
     console.error("[POST generate-prompt]", err);
     return NextResponse.json(

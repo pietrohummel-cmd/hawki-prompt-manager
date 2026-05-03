@@ -3,7 +3,7 @@
 import { useEffect, useState, useCallback } from "react";
 import { useParams } from "next/navigation";
 import {
-  Plus, X, Sparkles, Check, ChevronDown, ChevronUp,
+  Plus, X, Check, ChevronDown, ChevronUp,
   AlertCircle, Ticket,
 } from "lucide-react";
 import { MODULE_LABELS, MODULE_ORDER } from "@/lib/prompt-constants";
@@ -25,8 +25,8 @@ const PRIORITY_COLORS: Record<TicketPriority, string> = {
 };
 
 const STATUS_LABELS: Record<TicketStatus, string> = {
-  OPEN:       "Aberto",
-  SUGGESTED:  "Sugestão gerada",
+  OPEN:       "Analisando...",
+  SUGGESTED:  "Correção gerada",
   APPROVED:   "Aprovado",
   APPLIED:    "Aplicado",
   REJECTED:   "Rejeitado",
@@ -46,15 +46,15 @@ type StatusFilter = TicketStatus | "ALL";
 
 const FILTER_TABS: { value: StatusFilter; label: string }[] = [
   { value: "ALL",       label: "Todos" },
-  { value: "OPEN",      label: "Abertos" },
-  { value: "SUGGESTED", label: "Com sugestão" },
+  { value: "OPEN",      label: "Analisando" },
+  { value: "SUGGESTED", label: "Aguardando revisão" },
   { value: "APPLIED",   label: "Aplicados" },
   { value: "REJECTED",  label: "Rejeitados" },
 ];
 
 /* ── Tipos ──────────────────────────────────────────────── */
 
-interface Ticket {
+interface TicketItem {
   id: string;
   description: string;
   conversationTranscript: string | null;
@@ -80,7 +80,7 @@ export default function TicketsPage() {
   const { id } = useParams<{ id: string }>();
   const { toast, showToast, dismiss } = useToast();
 
-  const [tickets, setTickets]   = useState<Ticket[]>([]);
+  const [tickets, setTickets]   = useState<TicketItem[]>([]);
   const [loading, setLoading]   = useState(true);
   const [error, setError]       = useState<string | null>(null);
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("ALL");
@@ -89,13 +89,12 @@ export default function TicketsPage() {
   const [showForm, setShowForm]         = useState(false);
   const [formDesc, setFormDesc]         = useState("");
   const [formTranscript, setFormTranscript] = useState("");
-  const [formModule, setFormModule]     = useState<ModuleKey | "">("");
   const [formPriority, setFormPriority] = useState<TicketPriority>("NORMAL");
   const [creating, setCreating]         = useState(false);
   const [createError, setCreateError]   = useState<string | null>(null);
 
   // Estado por ticket
-  const [suggesting, setSuggesting]       = useState<string | null>(null);
+  const [processing, setProcessing]       = useState<string | null>(null); // auto-pipeline
   const [applying, setApplying]           = useState<string | null>(null);
   const [expandedTicket, setExpandedTicket] = useState<string | null>(null);
   const [editingSuggestion, setEditingSuggestion] = useState<Record<string, string>>({});
@@ -116,7 +115,6 @@ export default function TicketsPage() {
 
   useEffect(() => { load(); }, [load]);
 
-  // Fechar modal com Escape
   useEffect(() => {
     if (!showForm) return;
     const h = (e: KeyboardEvent) => { if (e.key === "Escape") closeForm(); };
@@ -126,8 +124,34 @@ export default function TicketsPage() {
 
   function closeForm() {
     setShowForm(false);
-    setFormDesc(""); setFormTranscript(""); setFormModule(""); setFormPriority("NORMAL");
+    setFormDesc(""); setFormTranscript(""); setFormPriority("NORMAL");
     setCreateError(null);
+  }
+
+  // Erros de identificação de módulo (422) ficam inline no ticket, não em toast
+  const [processError, setProcessError] = useState<Record<string, string>>({});
+
+  // Auto-pipeline: identify module + generate suggestion
+  async function handleProcess(ticketId: string) {
+    setProcessing(ticketId);
+    setProcessError((prev) => { const n = { ...prev }; delete n[ticketId]; return n; });
+    try {
+      const res = await fetch(`/api/clients/${id}/tickets/${ticketId}/process`, { method: "POST" });
+      const data = await res.json();
+      if (res.status === 422) {
+        // Módulo não identificado — manter OPEN, mostrar aviso inline para seleção manual
+        setProcessError((prev) => ({ ...prev, [ticketId]: data.error ?? "Módulo não identificado" }));
+        return;
+      }
+      if (!res.ok) throw new Error(data.error ?? "Erro ao processar ticket");
+      setTickets((prev) => prev.map((t) => t.id === ticketId ? data : t));
+      setEditingSuggestion((prev) => ({ ...prev, [ticketId]: data.aiSuggestion ?? "" }));
+      setExpandedTicket(ticketId);
+    } catch (err) {
+      showToast({ type: "error", message: err instanceof Error ? err.message : "Erro ao processar" });
+    } finally {
+      setProcessing(null);
+    }
   }
 
   async function handleCreate() {
@@ -141,15 +165,17 @@ export default function TicketsPage() {
         body: JSON.stringify({
           description: formDesc,
           conversationTranscript: formTranscript || undefined,
-          affectedModule: formModule || undefined,
           priority: formPriority,
         }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error ?? "Erro ao criar ticket");
       closeForm();
-      await load();
-      showToast({ type: "success", message: "Ticket criado com sucesso." });
+      // Add ticket to list immediately, then auto-process it
+      setTickets((prev) => [data, ...prev]);
+      setExpandedTicket(data.id);
+      // Trigger auto-pipeline in background (no await here — UI updates reactively)
+      handleProcess(data.id);
     } catch (err) {
       setCreateError(err instanceof Error ? err.message : "Erro ao criar");
     } finally {
@@ -157,24 +183,7 @@ export default function TicketsPage() {
     }
   }
 
-  async function handleSuggest(ticketId: string) {
-    setSuggesting(ticketId);
-    try {
-      const res = await fetch(`/api/clients/${id}/tickets/${ticketId}/suggest`, { method: "POST" });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error ?? "Erro ao gerar sugestão");
-      setTickets((prev) => prev.map((t) => (t.id === ticketId ? data : t)));
-      setEditingSuggestion((prev) => ({ ...prev, [ticketId]: data.aiSuggestion ?? "" }));
-      setExpandedTicket(ticketId);
-      showToast({ type: "success", message: "Sugestão da IA gerada." });
-    } catch (err) {
-      showToast({ type: "error", message: err instanceof Error ? err.message : "Erro ao sugerir" });
-    } finally {
-      setSuggesting(null);
-    }
-  }
-
-  async function handleApply(ticket: Ticket) {
+  async function handleApply(ticket: TicketItem) {
     const content = editingSuggestion[ticket.id] ?? ticket.aiSuggestion ?? "";
     if (!content) return;
     setApplying(ticket.id);
@@ -192,12 +201,8 @@ export default function TicketsPage() {
         type: "success",
         message: "Correção aplicada. Nova versão criada.",
         action: {
-          label: "Ver prompt",
-          onClick: () => {
-            // Dispara o botão "Ver prompt completo" no ClientNav
-            const btn = document.querySelector<HTMLButtonElement>("[data-prompt-modal]");
-            btn?.click();
-          },
+          label: "Ver versão",
+          onClick: () => { window.location.href = `/clients/${id}/versions`; },
         },
       });
     } catch (err) {
@@ -243,7 +248,7 @@ export default function TicketsPage() {
     }
   }
 
-  // Filtros
+  // Filters
   const filtered = tickets.filter((t) =>
     statusFilter === "ALL" ? true : t.status === statusFilter
   );
@@ -287,7 +292,7 @@ export default function TicketsPage() {
           </div>
         )}
 
-        {/* Filtro por status */}
+        {/* Filtros */}
         {tickets.length > 0 && (
           <div className="flex gap-1 mb-4 flex-wrap">
             {FILTER_TABS.map(({ value, label }) => {
@@ -324,8 +329,8 @@ export default function TicketsPage() {
           <div className="card p-12 text-center">
             <Ticket size={28} className="text-[var(--text-disabled)] mx-auto mb-3" />
             <p className="text-[var(--text-secondary)] text-[13px]">Nenhum ticket ainda.</p>
-            <p className="text-[var(--text-disabled)] text-[12px] mt-1">
-              Crie um ticket para registrar um problema ou melhoria no prompt.
+            <p className="text-[var(--text-disabled)] text-[12px] mt-1 max-w-xs mx-auto">
+              Registre um problema que a Sofia apresentou em produção. A IA identifica o módulo e gera a correção automaticamente.
             </p>
           </div>
         )}
@@ -333,7 +338,7 @@ export default function TicketsPage() {
         {filtered.length === 0 && tickets.length > 0 && (
           <div className="card p-8 text-center">
             <p className="text-[var(--text-muted)] text-[13px]">
-              Nenhum ticket com status "{STATUS_LABELS[statusFilter as TicketStatus]}".
+              Nenhum ticket com este status.
             </p>
           </div>
         )}
@@ -342,11 +347,11 @@ export default function TicketsPage() {
         <div className="space-y-2">
           {filtered.map((ticket, i) => {
             const expanded = expandedTicket === ticket.id;
+            const isProcessing = processing === ticket.id;
             const suggestionContent = editingSuggestion[ticket.id] ?? ticket.aiSuggestion ?? "";
             const currentModule = editingModule[ticket.id] !== undefined
               ? editingModule[ticket.id]
               : (ticket.affectedModule ?? "");
-            const canSuggest = currentModule && (ticket.status === "OPEN" || ticket.status === "SUGGESTED");
             const canApply = (ticket.status === "SUGGESTED" || ticket.status === "APPROVED") && suggestionContent;
             const isDone = ticket.status === "APPLIED" || ticket.status === "REJECTED";
 
@@ -356,7 +361,7 @@ export default function TicketsPage() {
                 style={{ animationDelay: `${i * 30}ms` }}
                 className="animate-fade-up card overflow-hidden"
               >
-                {/* Cabeçalho do ticket */}
+                {/* Cabeçalho */}
                 <button
                   className="w-full flex items-start justify-between px-4 py-3.5 text-left hover:bg-[var(--surface-raised)]/50 transition-colors duration-150"
                   onClick={() => setExpandedTicket(expanded ? null : ticket.id)}
@@ -366,20 +371,29 @@ export default function TicketsPage() {
                       {ticket.description}
                     </p>
                     <div className="flex items-center gap-2 mt-2 flex-wrap">
-                      <span className={`text-[11px] px-2 py-0.5 rounded-full font-medium ${STATUS_COLORS[ticket.status]}`}>
-                        {STATUS_LABELS[ticket.status]}
-                      </span>
-                      <span className={`text-[11px] px-2 py-0.5 rounded-full font-medium ${PRIORITY_COLORS[ticket.priority]}`}>
-                        {PRIORITY_LABELS[ticket.priority]}
-                      </span>
-                      {ticket.affectedModule && (
-                        <span className="text-[11px] text-[var(--text-muted)]">
-                          {MODULE_LABELS[ticket.affectedModule]}
+                      {isProcessing ? (
+                        <span className="flex items-center gap-1.5 text-[11px] text-amber-400">
+                          <span className="w-2.5 h-2.5 border-2 border-amber-400/30 border-t-amber-400 rounded-full animate-spin" />
+                          Identificando módulo e gerando correção...
                         </span>
+                      ) : (
+                        <>
+                          <span className={`text-[11px] px-2 py-0.5 rounded-full font-medium ${STATUS_COLORS[ticket.status]}`}>
+                            {STATUS_LABELS[ticket.status]}
+                          </span>
+                          <span className={`text-[11px] px-2 py-0.5 rounded-full font-medium ${PRIORITY_COLORS[ticket.priority]}`}>
+                            {PRIORITY_LABELS[ticket.priority]}
+                          </span>
+                          {ticket.affectedModule && (
+                            <span className="text-[11px] text-[var(--text-muted)] bg-[var(--surface-raised)] px-2 py-0.5 rounded-full">
+                              {MODULE_LABELS[ticket.affectedModule]}
+                            </span>
+                          )}
+                          <span className="text-[11px] text-[var(--text-disabled)] tabular-nums">
+                            v{ticket.promptVersion.version} · {formatDate(ticket.createdAt)}
+                          </span>
+                        </>
                       )}
-                      <span className="text-[11px] text-[var(--text-disabled)] tabular-nums">
-                        v{ticket.promptVersion.version} · {formatDate(ticket.createdAt)}
-                      </span>
                     </div>
                   </div>
                   {expanded
@@ -387,14 +401,19 @@ export default function TicketsPage() {
                     : <ChevronDown size={14} className="text-[var(--text-disabled)] shrink-0 mt-0.5" />}
                 </button>
 
-                {/* Detalhes do ticket */}
+                {/* Detalhes expandidos */}
                 {expanded && (
                   <div className="border-t border-[var(--surface-border)] px-4 py-4 space-y-4">
 
-                    {/* Módulo afetado — editável */}
+                    {/* Módulo identificado (editável como override) */}
                     <div>
                       <label className="text-[11px] font-medium text-[var(--text-muted)] uppercase tracking-[0.1em] mb-1.5 block">
-                        Módulo afetado
+                        Módulo identificado
+                        {ticket.affectedModule && !editingModule[ticket.id] && (
+                          <span className="normal-case tracking-normal text-[var(--text-disabled)] font-normal ml-1">
+                            — identificado automaticamente
+                          </span>
+                        )}
                       </label>
                       <div className="flex items-center gap-2">
                         <select
@@ -402,35 +421,40 @@ export default function TicketsPage() {
                           onChange={(e) =>
                             setEditingModule((prev) => ({ ...prev, [ticket.id]: e.target.value as ModuleKey | "" }))
                           }
-                          disabled={isDone}
+                          disabled={isDone || isProcessing}
                           className="flex-1 bg-[var(--surface-raised)] border border-[var(--surface-border)] text-[var(--text-primary)] text-[13px] rounded-md px-3 py-2 focus:outline-none focus:border-[var(--accent)] transition-colors disabled:opacity-50"
                         >
-                          <option value="">Não especificado</option>
+                          <option value="">Nenhum</option>
                           {MODULE_KEYS.map((key) => (
                             <option key={key} value={key}>{MODULE_LABELS[key]}</option>
                           ))}
                         </select>
                         {editingModule[ticket.id] !== undefined && (
-                          <button
-                            onClick={() => handleSaveModule(ticket.id)}
-                            disabled={savingModule === ticket.id}
-                            className="press flex items-center gap-1.5 text-[12px] font-medium px-3 py-2 rounded-md bg-[var(--accent)] hover:bg-[var(--accent-hover)] text-white transition-colors disabled:opacity-50"
-                          >
-                            {savingModule === ticket.id ? (
-                              <span className="w-3 h-3 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-                            ) : (
-                              <Check size={12} />
-                            )}
-                            Salvar
-                          </button>
+                          <>
+                            <button
+                              onClick={() => handleSaveModule(ticket.id)}
+                              disabled={savingModule === ticket.id}
+                              className="press flex items-center gap-1.5 text-[12px] font-medium px-3 py-2 rounded-md bg-[var(--accent)] hover:bg-[var(--accent-hover)] text-white transition-colors disabled:opacity-50"
+                            >
+                              {savingModule === ticket.id
+                                ? <span className="w-3 h-3 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                                : <Check size={12} />}
+                              Salvar
+                            </button>
+                            {/* Re-run pipeline after module override */}
+                            <button
+                              onClick={async () => {
+                                await handleSaveModule(ticket.id);
+                                handleProcess(ticket.id);
+                              }}
+                              disabled={savingModule === ticket.id || isProcessing}
+                              className="press text-[12px] text-[var(--accent-text)] bg-[var(--accent-subtle)] hover:bg-[var(--accent-subtle)]/80 border border-[var(--accent)]/30 px-3 py-2 rounded-md transition-colors disabled:opacity-50"
+                            >
+                              Salvar e regerar
+                            </button>
+                          </>
                         )}
                       </div>
-                      {!currentModule && !isDone && (
-                        <p className="text-[11px] text-amber-500/80 mt-1.5 flex items-center gap-1">
-                          <AlertCircle size={11} />
-                          Selecione um módulo para habilitar sugestão de IA.
-                        </p>
-                      )}
                     </div>
 
                     {/* Transcrição */}
@@ -445,63 +469,109 @@ export default function TicketsPage() {
                       </div>
                     )}
 
+                    {/* Loader enquanto pipeline roda */}
+                    {isProcessing && (
+                      <div className="flex items-center gap-3 bg-amber-500/5 border border-amber-500/20 rounded-md px-4 py-3">
+                        <span className="w-4 h-4 border-2 border-amber-400/30 border-t-amber-400 rounded-full animate-spin shrink-0" />
+                        <div>
+                          <p className="text-[13px] text-amber-400 font-medium">Analisando problema...</p>
+                          <p className="text-[11px] text-[var(--text-disabled)] mt-0.5">
+                            A IA está identificando o módulo afetado e gerando a correção.
+                          </p>
+                        </div>
+                      </div>
+                    )}
+
                     {/* Sugestão da IA */}
-                    {(ticket.aiSuggestion || editingSuggestion[ticket.id]) && (
+                    {!isProcessing && (ticket.aiSuggestion || editingSuggestion[ticket.id] !== undefined) && (
                       <div>
-                        <p className="text-[11px] font-medium text-[var(--text-muted)] uppercase tracking-[0.1em] mb-1.5">
-                          Sugestão da IA{" "}
-                          <span className="normal-case text-[var(--text-disabled)] tracking-normal">
-                            — editável antes de aplicar
+                        <div className="flex items-center justify-between mb-1.5">
+                          <p className="text-[11px] font-medium text-[var(--text-muted)] uppercase tracking-[0.1em]">
+                            Correção sugerida pela IA
+                          </p>
+                          <span className="text-[10px] text-[var(--text-disabled)]">
+                            Edite para usar sua própria correção
                           </span>
-                        </p>
+                        </div>
                         <textarea
                           value={suggestionContent}
                           onChange={(e) =>
                             setEditingSuggestion((prev) => ({ ...prev, [ticket.id]: e.target.value }))
                           }
-                          rows={8}
+                          rows={10}
                           disabled={isDone}
                           className="w-full bg-[var(--surface-raised)] border border-[var(--surface-border)] text-[var(--text-primary)] text-[12px] rounded-md px-3 py-2.5 font-mono resize-none focus:outline-none focus:border-[var(--accent)] transition-colors leading-relaxed disabled:opacity-60"
                         />
+                        {!isDone && (
+                          <p className="text-[11px] text-[var(--text-disabled)] mt-1">
+                            O conteúdo acima será aplicado no módulo <strong className="text-[var(--text-muted)]">{currentModule ? MODULE_LABELS[currentModule as ModuleKey] : "identificado"}</strong> ao criar a nova versão.
+                          </p>
+                        )}
+                      </div>
+                    )}
+
+                    {/* Erro de identificação de módulo (422) — módulo não identificado */}
+                    {!isProcessing && processError[ticket.id] && (
+                      <div className="bg-red-500/5 border border-red-500/20 rounded-md px-4 py-3 space-y-2">
+                        <div className="flex items-start gap-2">
+                          <AlertCircle size={13} className="text-red-400 shrink-0 mt-0.5" />
+                          <p className="text-[12px] text-red-400">{processError[ticket.id]}</p>
+                        </div>
+                        <p className="text-[11px] text-[var(--text-disabled)]">
+                          Selecione o módulo manualmente no campo acima e clique em "Salvar e regerar".
+                        </p>
+                      </div>
+                    )}
+
+                    {/* Reprocessar se ainda OPEN sem erro e sem sugestão */}
+                    {!isProcessing && ticket.status === "OPEN" && !isDone && !processError[ticket.id] && (
+                      <div className="flex items-center gap-2 bg-amber-500/5 border border-amber-500/20 rounded-md px-4 py-3">
+                        <AlertCircle size={13} className="text-amber-400 shrink-0" />
+                        <p className="text-[12px] text-[var(--text-muted)] flex-1">
+                          A análise automática ainda não foi concluída.
+                        </p>
+                        <button
+                          onClick={() => handleProcess(ticket.id)}
+                          className="press text-[12px] text-amber-400 hover:text-amber-300 border border-amber-500/30 px-3 py-1.5 rounded-md transition-colors"
+                        >
+                          Analisar agora
+                        </button>
                       </div>
                     )}
 
                     {/* Ações */}
-                    {!isDone && (
+                    {!isDone && !isProcessing && (
                       <div className="flex items-center gap-2 flex-wrap pt-1">
-                        {canSuggest && (
-                          <button
-                            onClick={() => handleSuggest(ticket.id)}
-                            disabled={suggesting === ticket.id || applying === ticket.id}
-                            className="press flex items-center gap-1.5 text-[13px] text-[var(--text-secondary)] bg-[var(--surface-raised)] hover:bg-[var(--surface-border)] border border-[var(--surface-border)] disabled:opacity-50 px-4 py-2 rounded-md transition-colors duration-150"
-                          >
-                            {suggesting === ticket.id ? (
-                              <span className="w-3 h-3 border-2 border-[var(--text-disabled)] border-t-[var(--text-primary)] rounded-full animate-spin" />
-                            ) : (
-                              <Sparkles size={13} className="text-[var(--accent)]" />
-                            )}
-                            {suggesting === ticket.id ? "Gerando sugestão..." : "Sugerir com IA"}
-                          </button>
-                        )}
-
                         {canApply && (
-                          <button
-                            onClick={() => handleApply(ticket)}
-                            disabled={applying === ticket.id || suggesting === ticket.id}
-                            className="press flex items-center gap-1.5 text-[13px] bg-[var(--accent)] hover:bg-[var(--accent-hover)] disabled:opacity-50 text-white font-medium px-4 py-2 rounded-md transition-colors duration-150"
-                          >
-                            {applying === ticket.id ? (
-                              <span className="w-3 h-3 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-                            ) : (
-                              <Check size={13} />
-                            )}
-                            {applying === ticket.id ? "Aplicando..." : "Aplicar correção"}
-                          </button>
+                          <>
+                            {/* Aprovação com texto editado */}
+                            <button
+                              onClick={() => handleApply(ticket)}
+                              disabled={applying === ticket.id}
+                              className="press flex items-center gap-1.5 text-[13px] bg-[var(--accent)] hover:bg-[var(--accent-hover)] disabled:opacity-50 text-white font-medium px-4 py-2 rounded-md transition-colors duration-150"
+                            >
+                              {applying === ticket.id ? (
+                                <span className="w-3 h-3 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                              ) : (
+                                <Check size={13} />
+                              )}
+                              {applying === ticket.id ? "Aplicando..." : "Aplicar correção"}
+                            </button>
+
+                            {/* Reprocessar — gera nova sugestão */}
+                            <button
+                              onClick={() => handleProcess(ticket.id)}
+                              disabled={applying === ticket.id}
+                              className="press text-[12px] text-[var(--text-muted)] hover:text-[var(--text-secondary)] border border-[var(--surface-border)] px-3 py-2 rounded-md transition-colors disabled:opacity-50"
+                            >
+                              Regerar sugestão
+                            </button>
+                          </>
                         )}
 
-                        {/* Rejeitar — separado visualmente */}
                         <button
                           onClick={() => handleReject(ticket.id)}
+                          disabled={applying === ticket.id}
                           className="press text-[12px] text-[var(--text-disabled)] hover:text-red-400 transition-colors ml-auto px-3 py-2 rounded-md hover:bg-red-500/5"
                         >
                           Rejeitar
@@ -514,7 +584,7 @@ export default function TicketsPage() {
                         {ticket.status === "APPLIED" ? (
                           <>
                             <Check size={12} className="text-emerald-400" />
-                            Correção aplicada — uma nova versão do prompt foi criada.
+                            Correção aplicada — nova versão criada.
                           </>
                         ) : "Ticket rejeitado."}
                       </p>
@@ -534,14 +604,13 @@ export default function TicketsPage() {
           onClick={(e) => { if (e.target === e.currentTarget) closeForm(); }}
         >
           <div className="bg-[var(--surface)] border border-[var(--surface-border)] rounded-xl w-full max-w-lg shadow-2xl animate-fade-up">
-            {/* Header */}
             <div className="flex items-center justify-between px-5 py-4 border-b border-[var(--surface-border)]">
               <div>
                 <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-[var(--text-disabled)] mb-0.5">
                   Novo ticket
                 </p>
                 <h2 className="text-[14px] font-semibold text-[var(--text-primary)]">
-                  Registrar problema ou melhoria
+                  Registrar problema de produção
                 </h2>
               </div>
               <button
@@ -552,8 +621,15 @@ export default function TicketsPage() {
               </button>
             </div>
 
-            {/* Body */}
             <div className="p-5 space-y-4">
+              {/* Info pill */}
+              <div className="flex items-start gap-2.5 bg-[var(--accent-subtle)] border border-[var(--accent)]/20 rounded-md px-3.5 py-2.5">
+                <span className="text-[var(--accent-text)] text-base mt-px">✦</span>
+                <p className="text-[12px] text-[var(--accent-text)] leading-relaxed">
+                  Ao criar, a IA identifica automaticamente o módulo afetado e gera uma sugestão de correção para sua revisão.
+                </p>
+              </div>
+
               <div>
                 <label className="text-[11px] font-medium text-[var(--text-muted)] uppercase tracking-[0.1em] mb-1.5 block">
                   Descrição do problema <span className="text-red-400">*</span>
@@ -563,51 +639,15 @@ export default function TicketsPage() {
                   onChange={(e) => setFormDesc(e.target.value)}
                   rows={3}
                   autoFocus
-                  placeholder="Descreva o que está errado ou o que precisa melhorar..."
+                  placeholder="Ex: Sofia está respondendo com travessão e listas com bullets, parecendo robótica..."
                   className="w-full bg-[var(--surface-raised)] border border-[var(--surface-border)] text-[var(--text-primary)] text-[13px] rounded-md px-3 py-2.5 resize-none focus:outline-none focus:border-[var(--accent)] placeholder:text-[var(--text-disabled)] transition-colors leading-relaxed"
                 />
               </div>
 
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="text-[11px] font-medium text-[var(--text-muted)] uppercase tracking-[0.1em] mb-1.5 block">
-                    Módulo afetado
-                  </label>
-                  <select
-                    value={formModule}
-                    onChange={(e) => setFormModule(e.target.value as ModuleKey | "")}
-                    className="w-full bg-[var(--surface-raised)] border border-[var(--surface-border)] text-[var(--text-primary)] text-[13px] rounded-md px-3 py-2 focus:outline-none focus:border-[var(--accent)] transition-colors"
-                  >
-                    <option value="">Não especificado</option>
-                    {MODULE_KEYS.map((key) => (
-                      <option key={key} value={key}>{MODULE_LABELS[key]}</option>
-                    ))}
-                  </select>
-                  {!formModule && (
-                    <p className="text-[10px] text-[var(--text-disabled)] mt-1">
-                      Selecione para habilitar sugestão de IA
-                    </p>
-                  )}
-                </div>
-                <div>
-                  <label className="text-[11px] font-medium text-[var(--text-muted)] uppercase tracking-[0.1em] mb-1.5 block">
-                    Prioridade
-                  </label>
-                  <select
-                    value={formPriority}
-                    onChange={(e) => setFormPriority(e.target.value as TicketPriority)}
-                    className="w-full bg-[var(--surface-raised)] border border-[var(--surface-border)] text-[var(--text-primary)] text-[13px] rounded-md px-3 py-2 focus:outline-none focus:border-[var(--accent)] transition-colors"
-                  >
-                    <option value="NORMAL">Normal</option>
-                    <option value="CRITICAL">Crítico</option>
-                    <option value="IMPROVEMENT">Melhoria</option>
-                  </select>
-                </div>
-              </div>
-
               <div>
                 <label className="text-[11px] font-medium text-[var(--text-muted)] uppercase tracking-[0.1em] mb-1.5 block">
-                  Transcrição da conversa <span className="text-[var(--text-disabled)] normal-case tracking-normal">(opcional)</span>
+                  Transcrição da conversa{" "}
+                  <span className="normal-case tracking-normal text-[var(--text-disabled)] font-normal">(opcional — melhora a precisão da análise)</span>
                 </label>
                 <textarea
                   value={formTranscript}
@@ -618,6 +658,21 @@ export default function TicketsPage() {
                 />
               </div>
 
+              <div className="max-w-[180px]">
+                <label className="text-[11px] font-medium text-[var(--text-muted)] uppercase tracking-[0.1em] mb-1.5 block">
+                  Prioridade
+                </label>
+                <select
+                  value={formPriority}
+                  onChange={(e) => setFormPriority(e.target.value as TicketPriority)}
+                  className="w-full bg-[var(--surface-raised)] border border-[var(--surface-border)] text-[var(--text-primary)] text-[13px] rounded-md px-3 py-2 focus:outline-none focus:border-[var(--accent)] transition-colors"
+                >
+                  <option value="NORMAL">Normal</option>
+                  <option value="CRITICAL">Crítico</option>
+                  <option value="IMPROVEMENT">Melhoria</option>
+                </select>
+              </div>
+
               {createError && (
                 <p className="text-[12px] text-red-400 flex items-center gap-1.5">
                   <AlertCircle size={12} />
@@ -626,7 +681,6 @@ export default function TicketsPage() {
               )}
             </div>
 
-            {/* Footer */}
             <div className="flex items-center justify-end gap-2 px-5 py-4 border-t border-[var(--surface-border)]">
               <button
                 onClick={closeForm}
@@ -644,7 +698,7 @@ export default function TicketsPage() {
                 ) : (
                   <Plus size={13} />
                 )}
-                {creating ? "Criando..." : "Criar ticket"}
+                {creating ? "Criando..." : "Criar e analisar"}
               </button>
             </div>
           </div>

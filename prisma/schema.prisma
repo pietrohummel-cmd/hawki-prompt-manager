@@ -89,6 +89,31 @@ enum ConvOutcome {
   LOST
 }
 
+enum ServiceCategory {
+  IMPLANTES
+  ORTODONTIA
+  ESTETICA
+  CLINICO_GERAL
+  PERIODONTIA
+  ENDODONTIA
+  PEDIATRIA
+  PROTESE
+  CIRURGIA
+  OUTROS
+}
+
+enum InteractionStatus {
+  PENDING_REVIEW
+  APPROVED
+  REJECTED
+}
+
+enum KnowledgeStatus {
+  DRAFT
+  ACTIVE
+  ARCHIVED
+}
+
 // ─────────────────────────────────────────────
 // Client — dados do cliente (clínica)
 // ─────────────────────────────────────────────
@@ -130,6 +155,7 @@ model Client {
   businessHours     String?          // horários de atendimento
   procedureType     String?          // especialidade majoritária
   clinicPositioning String?          // posicionamento (ex: Popular, Intermediária, Premium)
+  serviceCategories ServiceCategory[]               // especialidades principais (usadas para injeção de conhecimento)
   minConversationsPerVersion Int     @default(10) // mínimo de conversas por versão
   status            ClientStatus     @default(ONBOARDING)
   createdAt         DateTime         @default(now())
@@ -348,6 +374,49 @@ model OnboardingUpload {
   fileUrl     String
   parsedData  Json
   createdAt   DateTime @default(now())
+}
+
+// ─────────────────────────────────────────────
+// SuccessfulInteraction — conversas aprovadas, cross-tenant
+// Sem clientId: dados anonimizados que alimentam a inteligência Hawki.
+// ─────────────────────────────────────────────
+
+model SuccessfulInteraction {
+  id             String            @id @default(cuid())
+  // SEM clientId — dados anônimos e reutilizáveis entre clientes
+  category       ServiceCategory
+  transcript     String            @db.Text   // texto anonimizado (sem clínica/nome)
+  outcome        ConvOutcome                  // SCHEDULED | NOT_SCHEDULED | LOST
+  scoreQuality   Float?                       // 0–1: qualidade geral avaliada por LLM
+  scoreTone      Float?                       // 0–1: adequação do tom
+  scoreObjection Float?                       // 0–1: handling de objeções
+  status         InteractionStatus @default(PENDING_REVIEW)
+  reviewedAt     DateTime?
+  reviewNote     String?           @db.Text
+  uploadedAt     DateTime          @default(now())
+
+  @@index([category, status])
+}
+
+// ─────────────────────────────────────────────
+// SpecialtyKnowledge — insights destilados por categoria
+// Sem clientId: cada insight é injetado em qualquer clínica da mesma categoria.
+// ─────────────────────────────────────────────
+
+model SpecialtyKnowledge {
+  id              String          @id @default(cuid())
+  // SEM clientId — conhecimento compartilhado cross-tenant
+  category        ServiceCategory
+  title           String
+  insight         String          @db.Text   // insight destilado para o prompt
+  examplePhrase   String?         @db.Text   // objeção ou frase típica do paciente
+  exampleResponse String?         @db.Text   // resposta modelo da Sofia
+  status          KnowledgeStatus @default(DRAFT)
+  sourceCount     Int             @default(0) // nº de interações que originaram este insight
+  createdAt       DateTime        @default(now())
+  updatedAt       DateTime        @updatedAt
+
+  @@index([category, status])
 }
 
 // ─────────────────────────────────────────────

@@ -6,6 +6,7 @@ import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import { parseOnboardingFile } from "@/lib/csv-parser";
+import { CATEGORY_LABELS, CATEGORY_KEYS } from "@/lib/intelligence-constants";
 import type { ParsedOnboardingData } from "@/types";
 
 const schema = z.object({
@@ -44,6 +45,7 @@ const schema = z.object({
   urgencyProcedure: z.string().optional(),
   procedureType: z.string().optional(),
   clinicPositioning: z.string().optional(),
+  serviceCategories: z.array(z.string()).optional(),
 });
 
 type FormData = z.infer<typeof schema>;
@@ -171,10 +173,13 @@ export default function NewClientPage() {
     setSaving(true);
     setError(null);
     try {
-      // Remove campos de enum vazios antes de enviar
-      const payload = Object.fromEntries(
-        Object.entries(data).filter(([, v]) => v !== "" && v !== undefined)
-      );
+      // Remove campos de enum vazios antes de enviar; garante serviceCategories como array
+      const payload = {
+        ...Object.fromEntries(
+          Object.entries(data).filter(([, v]) => v !== "" && v !== undefined)
+        ),
+        serviceCategories: data.serviceCategories ?? [],
+      };
 
       const res = await fetch("/api/clients", {
         method: "POST",
@@ -311,6 +316,24 @@ export default function NewClientPage() {
             </Field>
             <Field label="Público-alvo" className="col-span-2">
               <input {...register("targetAudience")} placeholder="Ex: adultos com dor dental, interessados em implantes" className={input()} />
+            </Field>
+            <Field label="Especialidades principais (Hawki Intelligence)" className="col-span-2">
+              <p className="text-xs text-[var(--text-muted)] mb-2">
+                Selecione as especialidades que a Sofia mais atende. Insights de conversas reais serão injetados automaticamente ao gerar o prompt.
+              </p>
+              <div className="grid grid-cols-3 gap-2 sm:grid-cols-5">
+                {CATEGORY_KEYS.map((k) => (
+                  <label key={k} className="flex items-center gap-2 text-xs text-[var(--text-secondary)] cursor-pointer select-none">
+                    <input
+                      type="checkbox"
+                      value={k}
+                      {...register("serviceCategories")}
+                      className="rounded border-[var(--border)] text-[var(--accent)] focus:ring-[var(--accent)]"
+                    />
+                    {CATEGORY_LABELS[k]}
+                  </label>
+                ))}
+              </div>
             </Field>
             <Field label="Faixa etária">
               <input {...register("ageRange")} placeholder="Ex: 40+" className={input()} />

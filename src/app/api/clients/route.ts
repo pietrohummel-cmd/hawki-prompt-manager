@@ -41,6 +41,10 @@ const createClientSchema = z.object({
   treatmentPronoun: z.string().optional(),
   procedureType: z.string().optional(),
   clinicPositioning: z.string().optional(),
+  serviceCategories: z.array(z.enum([
+    "IMPLANTES","ORTODONTIA","ESTETICA","CLINICO_GERAL",
+    "PERIODONTIA","ENDODONTIA","PEDIATRIA","PROTESE","CIRURGIA","OUTROS",
+  ])).optional().default([]),
 });
 
 export async function POST(request: Request) {

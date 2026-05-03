@@ -1,0 +1,99 @@
+/**
+ * Scoring automático de interações aprovadas.
+ *
+ * Avalia 3 dimensões (0–1) via claude-haiku:
+ *   - scoreQuality   : clareza, completude, resolução da dúvida
+ *   - scoreTone      : tom humanizado e profissional para odontologia
+ *   - scoreObjection : handling de objeções (preço, medo, urgência)
+ *
+ * Persiste os scores de volta na SuccessfulInteraction.
+ */
+
+import Anthropic from "@anthropic-ai/sdk";
+import { prisma } from "@/lib/prisma";
+import { CATEGORY_LABELS } from "@/lib/intelligence-constants";
+import { logUsage } from "@/lib/usage-logger";
+import type { ServiceCategory } from "@/generated/prisma";
+
+function getAnthropic() {
+  return new Anthropic({ apiKey: process.env.HAWKI_ANTHROPIC_API_KEY });
+}
+
+interface ScoreResult {
+  scoreQuality: number;
+  scoreTone: number;
+  scoreObjection: number;
+}
+
+async function evaluateWithLLM(
+  transcript: string,
+  category: ServiceCategory
+): Promise<ScoreResult> {
+  const categoryLabel = CATEGORY_LABELS[category];
+
+  const prompt = `Você é um avaliador especializado em qualidade de conversas de atendimento odontológico.
+
+Avalie a conversa abaixo em 3 dimensões, com notas de 0.0 a 1.0:
+
+1. scoreQuality: qualidade geral (clareza, completude, resolveu a dúvida do paciente, atendimento humanizado)
+2. scoreTone: tom adequado para uma clínica odontológica (cordial, acolhedor, profissional — sem ser robótico)
+3. scoreObjection: handling de objeções sobre ${categoryLabel} (preço, medo, urgência, comparações). Se não houver objeção na conversa, atribua 0.5
+
+CATEGORIA: ${categoryLabel}
+
+CONVERSA:
+${transcript.slice(0, 3000)}
+
+Responda APENAS com JSON válido:
+{"scoreQuality": 0.0, "scoreTone": 0.0, "scoreObjection": 0.0}`;
+
+  const message = await getAnthropic().messages.create({
+    model: "claude-haiku-4-5-20251001",
+    max_tokens: 128,
+    messages: [{ role: "user", content: prompt }],
+  });
+
+  await logUsage({
+    operation: "interaction_score",
+    model: "claude-haiku-4-5-20251001",
+    usage: message.usage,
+  });
+
+  const text = message.content[0].type === "text" ? message.content[0].text.trim() : "{}";
+  try {
+    const raw = text.match(/\{[\s\S]*\}/)?.[0] ?? text;
+    const result = JSON.parse(raw);
+    return {
+      scoreQuality:   clamp(Number(result.scoreQuality)   ?? 0),
+      scoreTone:      clamp(Number(result.scoreTone)      ?? 0),
+      scoreObjection: clamp(Number(result.scoreObjection) ?? 0.5),
+    };
+  } catch {
+    console.warn("[interaction-scorer] Failed to parse score JSON:", text);
+    return { scoreQuality: 0.5, scoreTone: 0.5, scoreObjection: 0.5 };
+  }
+}
+
+function clamp(v: number): number {
+  return Math.min(1, Math.max(0, isNaN(v) ? 0.5 : v));
+}
+
+/**
+ * Pontua uma interação aprovada e persiste os scores.
+ * Retorna os scores calculados.
+ */
+export async function scoreInteraction(interactionId: string): Promise<ScoreResult> {
+  const interaction = await prisma.successfulInteraction.findUnique({
+    where: { id: interactionId },
+  });
+  if (!interaction) throw new Error(`Interação ${interactionId} não encontrada`);
+
+  const scores = await evaluateWithLLM(interaction.transcript, interaction.category);
+
+  await prisma.successfulInteraction.update({
+    where: { id: interactionId },
+    data: scores,
+  });
+
+  return scores;
+}

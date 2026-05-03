@@ -11,6 +11,8 @@ import {
   PlusCircle,
   BookOpen,
   FileText,
+  Sparkles,
+  Brain,
   Sun,
   Moon,
   Monitor,
@@ -20,6 +22,8 @@ const navItems = [
   { href: "/dashboard",      label: "Dashboard",     icon: LayoutDashboard, group: "main" },
   { href: "/clients",        label: "Clientes",      icon: Users,           group: "main" },
   { href: "/clients/new",    label: "Novo cliente",  icon: PlusCircle,      group: "main" },
+  { href: "/inteligencia",              label: "Inteligência",      icon: Sparkles,  group: "main" },
+  { href: "/inteligencia/conhecimento", label: "Base de Conhecimento", icon: Brain,    group: "main" },
   { href: "/knowledge-base", label: "Knowledge Base",icon: BookOpen,        group: "library" },
   { href: "/templates",      label: "Templates",     icon: FileText,        group: "library" },
 ];

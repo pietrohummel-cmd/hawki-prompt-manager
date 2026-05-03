@@ -6,7 +6,7 @@ import { KB_TOPICS, type KbTopicKey } from "@/lib/kb-topics";
 
 export { KB_TOPICS, type KbTopicKey };
 
-const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
+const anthropic = new Anthropic({ apiKey: process.env.HAWKI_ANTHROPIC_API_KEY });
 
 export interface KbArticle {
   topic: KbTopicKey;

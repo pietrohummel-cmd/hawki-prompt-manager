@@ -27,7 +27,9 @@ export type OperationType =
   | "identify_module"
   | "generate_kb"
   | "pipeline_analyze"
-  | "pipeline_fix";
+  | "pipeline_fix"
+  | "interaction_score"
+  | "knowledge_distill";
 
 export interface UsageData {
   input_tokens: number;

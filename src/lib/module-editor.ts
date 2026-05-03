@@ -5,7 +5,7 @@ import { logUsage } from "@/lib/usage-logger";
 import { SOFIA_GUIDELINES_CONDENSED } from "@/lib/sofia-guidelines";
 
 function getAnthropic() {
-  return new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
+  return new Anthropic({ apiKey: process.env.HAWKI_ANTHROPIC_API_KEY });
 }
 
 // Descrição funcional de cada módulo — guia a IA na sugestão de melhoria

@@ -1,7 +1,7 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { prisma } from "@/lib/prisma";
 import { MODULE_ORDER } from "@/lib/prompt-constants";
-import type { ModuleKey, RegressionCase, RegressionRun, PromptVersion, PromptModule, Prisma } from "@/generated/prisma";
+import type { ModuleKey, RegressionCase, RegressionRun, PromptVersion, PromptModule } from "@/generated/prisma";
 
 type RegressionCaseWithExpected = RegressionCase & {
   criteria: string[];
@@ -9,24 +9,33 @@ type RegressionCaseWithExpected = RegressionCase & {
 };
 
 function getAnthropic() {
-  return new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
+  return new Anthropic({ apiKey: process.env.HAWKI_ANTHROPIC_API_KEY });
 }
 
 type ActiveVersion = PromptVersion & { modules: PromptModule[] };
 
-export async function runRegressionCase(
+export type RegressionEvalResult = {
+  response: string;
+  results: { criterion: string; passed: boolean }[];
+  status: "PASSED" | "FAILED";
+};
+
+/**
+ * Executa o caso de regressão contra uma versão e retorna o resultado SEM persistir.
+ * Use isso para validações de draft/pipeline que não devem aparecer no histórico canônico.
+ */
+export async function evaluateRegressionCase(
   regressionCase: RegressionCaseWithExpected,
-  activeVersion: ActiveVersion
-): Promise<RegressionRun> {
+  version: ActiveVersion
+): Promise<RegressionEvalResult> {
   const systemPrompt = MODULE_ORDER
-    .filter((key) => activeVersion.modules.some((m) => m.moduleKey === key))
+    .filter((key) => version.modules.some((m) => m.moduleKey === key))
     .map((key) => {
-      const mod = activeVersion.modules.find((m) => m.moduleKey === (key as ModuleKey))!;
+      const mod = version.modules.find((m) => m.moduleKey === (key as ModuleKey))!;
       return `###MÓDULO:${mod.moduleKey}###\n${mod.content}`;
     })
     .join("\n\n");
 
-  // Step 1: get Sofia's response
   const sofiaResponse = await getAnthropic().messages.create({
     model: "claude-sonnet-4-6",
     max_tokens: 1024,
@@ -39,10 +48,7 @@ export async function runRegressionCase(
     .map((b) => (b as { type: "text"; text: string }).text)
     .join("");
 
-  // Step 2: evaluate each criterion with Haiku
-  const criteriaList = regressionCase.criteria
-    .map((c, i) => `${i + 1}. ${c}`)
-    .join("\n");
+  const criteriaList = regressionCase.criteria.map((c, i) => `${i + 1}. ${c}`).join("\n");
 
   const expectedBlock = regressionCase.expectedResponse
     ? `\nResposta ideal esperada (use como referência de tom, estrutura e conteúdo):\n${regressionCase.expectedResponse}\n`
@@ -78,12 +84,23 @@ ${criteriaList}`;
   });
 
   const allPassed = results.every((r) => r.passed === true);
-  const status = allPassed ? "PASSED" : "FAILED";
+  return { response: responseText, results, status: allPassed ? "PASSED" : "FAILED" };
+}
+
+/**
+ * Executa o caso de regressão e PERSISTE o resultado no histórico canônico.
+ * Use apenas para runs contra a versão ativa em produção.
+ */
+export async function runRegressionCase(
+  regressionCase: RegressionCaseWithExpected,
+  activeVersion: ActiveVersion
+): Promise<RegressionRun> {
+  const { response, results, status } = await evaluateRegressionCase(regressionCase, activeVersion);
 
   return prisma.regressionRun.create({
     data: {
       caseId: regressionCase.id,
-      response: responseText,
+      response,
       results,
       status,
     },

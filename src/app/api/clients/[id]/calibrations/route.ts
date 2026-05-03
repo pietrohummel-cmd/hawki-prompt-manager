@@ -7,7 +7,7 @@ import { SOFIA_GUIDELINES_FULL } from "@/lib/sofia-guidelines";
 import { MODULE_ORDER } from "@/lib/prompt-constants";
 import type { ModuleKey } from "@/generated/prisma";
 
-const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
+const anthropic = new Anthropic({ apiKey: process.env.HAWKI_ANTHROPIC_API_KEY });
 
 const createSchema = z.object({
   humanConversation: z.string().min(1),

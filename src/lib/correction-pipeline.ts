@@ -10,15 +10,16 @@
  */
 
 import Anthropic from "@anthropic-ai/sdk";
+import { Prisma } from "@/generated/prisma";
 import type { Client, ModuleKey } from "@/generated/prisma";
 import { prisma } from "@/lib/prisma";
 import { MODULE_ORDER, MODULE_LABELS } from "@/lib/prompt-constants";
 import { SOFIA_GUIDELINES_CONDENSED } from "@/lib/sofia-guidelines";
 import { logUsage } from "@/lib/usage-logger";
-import { runRegressionCase } from "@/lib/regression-runner";
+import { evaluateRegressionCase } from "@/lib/regression-runner";
 
 function getAnthropic() {
-  return new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
+  return new Anthropic({ apiKey: process.env.HAWKI_ANTHROPIC_API_KEY });
 }
 
 interface Issue {
@@ -130,14 +131,7 @@ export async function runCorrectionPipeline(
   // 1 — Analisar issues
   const issues = await analyzeIssues(modules, problemDescription);
 
-  // 2 — Calcular próxima versão
-  const lastVersion = await prisma.promptVersion.findFirst({
-    where: { clientId: client.id },
-    orderBy: { version: "desc" },
-  });
-  const nextVersion = (lastVersion?.version ?? 0) + 1;
-
-  // 3 — Aplicar correções aos módulos
+  // 2 — Aplicar correções aos módulos (LLM work — feito ANTES da transação)
   const correctedModules = { ...modules };
   for (const issue of issues) {
     const current = correctedModules[issue.module];
@@ -145,36 +139,65 @@ export async function runCorrectionPipeline(
     correctedModules[issue.module] = await applyCorrection(client, issue.module, current, issue.description);
   }
 
-  // 4 — Reconstruir systemPrompt
+  // 3 — Reconstruir systemPrompt
   const systemPrompt = MODULE_ORDER
     .filter((k) => correctedModules[k])
     .map((k) => `###MÓDULO:${k}###\n${correctedModules[k]}`)
     .join("\n\n");
 
-  // 5 — Criar versão PENDING_REVIEW (não desativa a anterior)
-  const draftVersion = await prisma.promptVersion.create({
-    data: {
-      clientId: client.id,
-      version: nextVersion,
-      systemPrompt,
-      isActive: false,
-      status: "PENDING_REVIEW",
-      problemDescription,
-      generatedBy: "AI",
-      changesSummary: `Pipeline automático — ${issues.length} problema${issues.length !== 1 ? "s" : ""} identificado${issues.length !== 1 ? "s" : ""}`,
-      modules: {
-        create: MODULE_ORDER
-          .filter((k) => correctedModules[k])
-          .map((k) => ({ moduleKey: k as ModuleKey, content: correctedModules[k]! })),
-      },
-    },
-    include: { modules: true },
-  });
+  const changesSummary = `Pipeline automático — ${issues.length} problema${issues.length !== 1 ? "s" : ""} identificado${issues.length !== 1 ? "s" : ""}`;
+
+  // 4 — Alocar versão e criar o draft com retry em P2002.
+  // READ COMMITTED (padrão do PostgreSQL) não impede que dois pipelines simultâneos
+  // leiam o mesmo max version antes do create. O retry garante que o segundo tentará
+  // novamente com o número correto após a colisão no @@unique([clientId, version]).
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  let draftVersion: any = null;
+  for (let attempt = 0; attempt < 5; attempt++) {
+    try {
+      draftVersion = await prisma.$transaction(async (tx) => {
+        const lastVersion = await tx.promptVersion.findFirst({
+          where: { clientId: client.id },
+          orderBy: { version: "desc" },
+        });
+        const nextVersion = (lastVersion?.version ?? 0) + 1;
+
+        return tx.promptVersion.create({
+          data: {
+            clientId: client.id,
+            version: nextVersion,
+            systemPrompt,
+            isActive: false,
+            status: "PENDING_REVIEW",
+            problemDescription,
+            generatedBy: "AI",
+            changesSummary,
+            modules: {
+              create: MODULE_ORDER
+                .filter((k) => correctedModules[k])
+                .map((k) => ({ moduleKey: k as ModuleKey, content: correctedModules[k]! })),
+            },
+          },
+          include: { modules: true },
+        });
+      });
+      break; // sucesso — sair do loop
+    } catch (e) {
+      if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === "P2002" && attempt < 4) {
+        continue; // colisão de versão — tentar novamente
+      }
+      throw e;
+    }
+  }
+  if (!draftVersion) throw new Error("Falha ao alocar versão após 5 tentativas");
 
   // 6 — Criar tickets para cada issue
   for (const issue of issues) {
     const affectedModule = issue.module as ModuleKey;
     const correctedContent = correctedModules[affectedModule];
+    // Status SUGGESTED (não APPLIED) — a versão ainda é PENDING_REVIEW.
+    // O ticket só deve transitar para APPLIED quando a versão for efetivamente ativada.
+    // Marcar como APPLIED agora corromperia o audit trail se o draft for rejeitado.
     await prisma.correctionTicket.create({
       data: {
         clientId: client.id,
@@ -182,10 +205,10 @@ export async function runCorrectionPipeline(
         description: issue.description,
         affectedModule,
         priority: issue.priority,
-        status: "APPLIED",
+        status: "SUGGESTED",
         aiSuggestion: correctedContent ?? null,
-        finalCorrection: correctedContent ?? null,
-        resolvedAt: new Date(),
+        finalCorrection: null,
+        resolvedAt: null,
       },
     });
   }
@@ -198,9 +221,11 @@ export async function runCorrectionPipeline(
 
   let regressionPassed = 0;
 
+  // Usa evaluateRegressionCase (sem persistência) — runs de draft não devem
+  // poluir o histórico canônico da aba de Regressão.
   if (regressionCases.length > 0) {
     const results = await Promise.allSettled(
-      regressionCases.map((c) => runRegressionCase(c, draftVersion))
+      regressionCases.map((c) => evaluateRegressionCase(c, draftVersion))
     );
     regressionPassed = results.filter(
       (r) => r.status === "fulfilled" && r.value.status === "PASSED"
