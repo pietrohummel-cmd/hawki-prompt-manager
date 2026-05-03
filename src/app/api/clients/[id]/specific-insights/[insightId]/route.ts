@@ -1,6 +1,8 @@
 /**
  * PATCH  /api/clients/[id]/specific-insights/[insightId]  — atualiza insight
  * DELETE /api/clients/[id]/specific-insights/[insightId]  — remove insight
+ *
+ * Nota de segurança: veja nota no route.ts pai sobre ownership sistêmico.
  */
 
 import { auth } from "@clerk/nextjs/server";
@@ -36,28 +38,32 @@ export async function PATCH(req: Request, { params }: Params) {
       status?: KnowledgeStatus;
     };
 
-    // Activating: deactivate other ACTIVE insights for the same client+category
-    if (body.status === "ACTIVE" && existing.status !== "ACTIVE") {
-      await prisma.clientSpecificInsight.updateMany({
-        where: {
-          clientId,
-          category: existing.category,
-          status: "ACTIVE",
-          id: { not: insightId },
-        },
-        data: { status: "ARCHIVED" },
-      });
-    }
+    // Ativação + arquivamento das demais em uma única transação.
+    // Sem a transação, uma janela de corrida entre updateMany e update poderia
+    // deixar dois insights ACTIVE simultaneamente para o mesmo (clientId, category).
+    const updated = await prisma.$transaction(async (tx) => {
+      if (body.status === "ACTIVE" && existing.status !== "ACTIVE") {
+        await tx.clientSpecificInsight.updateMany({
+          where: {
+            clientId,
+            category: existing.category,
+            status: "ACTIVE",
+            id: { not: insightId },
+          },
+          data: { status: "ARCHIVED" },
+        });
+      }
 
-    const updated = await prisma.clientSpecificInsight.update({
-      where: { id: insightId },
-      data: {
-        ...(body.title   !== undefined && { title: body.title.trim() }),
-        ...(body.insight !== undefined && { insight: body.insight.trim() }),
-        ...(body.category !== undefined && { category: body.category }),
-        ...(body.example  !== undefined && { example: body.example?.trim() || null }),
-        ...(body.status   !== undefined && { status: body.status }),
-      },
+      return tx.clientSpecificInsight.update({
+        where: { id: insightId },
+        data: {
+          ...(body.title    !== undefined && { title: body.title.trim() }),
+          ...(body.insight  !== undefined && { insight: body.insight.trim() }),
+          ...(body.category !== undefined && { category: body.category }),
+          ...(body.example  !== undefined && { example: body.example?.trim() || null }),
+          ...(body.status   !== undefined && { status: body.status }),
+        },
+      });
     });
 
     return NextResponse.json(updated);

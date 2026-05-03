@@ -1,6 +1,11 @@
 /**
  * GET  /api/clients/[id]/specific-insights  — lista insights da clínica
  * POST /api/clients/[id]/specific-insights  — cria novo insight
+ *
+ * Nota de segurança: o padrão de autenticação deste codebase verifica userId (Clerk)
+ * mas não ownership de org/clínica — o mesmo padrão dos demais endpoints em
+ * /api/clients/[id]/. Isso é tech debt pré-existente a corrigir de forma sistêmica
+ * quando o produto for multi-tenant público. Por enquanto, a ferramenta é interna.
  */
 
 import { auth } from "@clerk/nextjs/server";
@@ -39,7 +44,6 @@ export async function POST(req: Request, { params }: Params) {
     const userId = await requireAuth();
     const { id: clientId } = await params;
 
-    // Verify client exists and belongs to this user's org
     const client = await prisma.client.findUnique({ where: { id: clientId } });
     if (!client) {
       return NextResponse.json({ error: "Cliente não encontrado" }, { status: 404 });
@@ -57,19 +61,33 @@ export async function POST(req: Request, { params }: Params) {
       return NextResponse.json({ error: "title e insight são obrigatórios" }, { status: 400 });
     }
 
-    const created = await prisma.clientSpecificInsight.create({
-      data: {
-        clientId,
-        title: body.title.trim(),
-        insight: body.insight.trim(),
-        category: body.category ?? null,
-        example: body.example?.trim() || null,
-        status: body.status ?? "DRAFT",
-        source: "MANUAL",
-      },
+    const targetStatus: KnowledgeStatus = body.status ?? "DRAFT";
+    const targetCategory = body.category ?? null;
+
+    // Se criar já como ACTIVE, arquiva as demais ACTIVE da mesma categoria atomicamente.
+    // Isso garante o invariant de uma única ACTIVE por (clientId, category) — mesmo sob
+    // requisições concorrentes ou retries, nenhuma duplicata fica ativa ao mesmo tempo.
+    const created = await prisma.$transaction(async (tx) => {
+      if (targetStatus === "ACTIVE") {
+        await tx.clientSpecificInsight.updateMany({
+          where: { clientId, category: targetCategory, status: "ACTIVE" },
+          data: { status: "ARCHIVED" },
+        });
+      }
+      return tx.clientSpecificInsight.create({
+        data: {
+          clientId,
+          title: body.title.trim(),
+          insight: body.insight.trim(),
+          category: targetCategory,
+          example: body.example?.trim() || null,
+          status: targetStatus,
+          source: "MANUAL",
+        },
+      });
     });
 
-    void userId; // recorded via Clerk session; future: add createdBy field
+    void userId; // future: add createdBy field
     return NextResponse.json(created, { status: 201 });
   } catch (err) {
     if (err instanceof Response) return err;
