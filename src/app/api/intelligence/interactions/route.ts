@@ -7,7 +7,7 @@ import { auth, currentUser } from "@clerk/nextjs/server";
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { prisma } from "@/lib/prisma";
-import { anonymizeTranscript, inferOutcome } from "@/lib/transcript-parser";
+import { anonymizeWithNer, inferOutcome } from "@/lib/transcript-parser";
 import { INTELLIGENCE_ADMIN_EMAILS, INTELLIGENCE_DEV_BYPASS } from "@/lib/intelligence-constants";
 import type { ServiceCategory, InteractionStatus, ConvOutcome } from "@/generated/prisma";
 
@@ -89,10 +89,10 @@ export async function POST(request: Request) {
 
   const { rawTranscript, category, outcome } = parsed.data;
 
-  // Anonimiza antes de armazenar
-  const transcript = anonymizeTranscript(rawTranscript);
+  // Anonimiza (regex + Haiku NER conforme ANONYMIZATION_LEVEL)
+  const { text: transcript } = await anonymizeWithNer(rawTranscript);
 
-  // Tenta inferir outcome se não foi fornecido
+  // Tenta inferir outcome se não foi fornecido (no texto bruto, mais sinal)
   const finalOutcome: ConvOutcome = outcome ?? inferOutcome(rawTranscript) ?? "NOT_SCHEDULED";
 
   const interaction = await prisma.successfulInteraction.create({

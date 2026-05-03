@@ -399,6 +399,19 @@ model SuccessfulInteraction {
 }
 
 // ─────────────────────────────────────────────
+// AnonymizationCache — cache de redactions feitas via NER
+// Chave: hash SHA-256 do texto (pós-regex). Evita pagar Haiku por reprocessamento.
+// ─────────────────────────────────────────────
+
+model AnonymizationCache {
+  contentHash String   @id              // SHA-256 hex do texto de entrada
+  anonymized  String   @db.Text         // texto final pós-NER
+  level       String                    // "regex" | "ner" | "strict"
+  redactions  Json?                     // metadata: { type, values: string[] }[]
+  createdAt   DateTime @default(now())
+}
+
+// ─────────────────────────────────────────────
 // KnowledgeBatch — lote gerado por uma destilação
 // Agrupa 3-5 insights extraídos juntos. Ativação é atômica:
 // promover um batch arquiva todos os outros ACTIVE da mesma categoria.

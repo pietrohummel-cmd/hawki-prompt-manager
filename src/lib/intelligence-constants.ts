@@ -35,3 +35,13 @@ export const INTELLIGENCE_DEV_BYPASS = process.env.NODE_ENV === "development";
 
 /** Quanto de cada padrão a incluir por categoria na injeção de conhecimento. */
 export const MAX_INSIGHTS_PER_INJECTION = 5;
+
+/** Nível de anonymização aplicado antes de persistir transcrições no corpus cross-tenant.
+ *  - regex:  apenas regex de phone/CPF/email/URL/data (rápido, gratuito, vaza nomes)
+ *  - ner:    regex + Haiku NER para nomes/clínicas/valores/endereços (~$0.001/conversa)
+ *  - strict: ner + flag manual_review_required na interação (curador precisa validar)
+ */
+export type AnonymizationLevel = "regex" | "ner" | "strict";
+
+export const ANONYMIZATION_LEVEL: AnonymizationLevel =
+  ((process.env.ANONYMIZATION_LEVEL ?? "ner").toLowerCase() as AnonymizationLevel);

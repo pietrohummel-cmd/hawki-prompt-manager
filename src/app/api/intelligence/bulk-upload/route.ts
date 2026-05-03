@@ -15,7 +15,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { prisma } from "@/lib/prisma";
 import { parseWhatsAppExport } from "@/lib/whatsapp-parser";
-import { anonymizeTranscript, inferOutcome } from "@/lib/transcript-parser";
+import { anonymizeWithNer, inferOutcome } from "@/lib/transcript-parser";
 import { INTELLIGENCE_ADMIN_EMAILS, INTELLIGENCE_DEV_BYPASS } from "@/lib/intelligence-constants";
 import type { ServiceCategory, ConvOutcome } from "@/generated/prisma";
 
@@ -58,26 +58,34 @@ export async function POST(request: Request) {
     );
   }
 
-  // Cria todas as interações em batch
-  const created = await Promise.allSettled(
-    conversations.map(async (conv) => {
-      const transcript = anonymizeTranscript(conv.raw);
-      const finalOutcome: ConvOutcome =
-        outcome ?? inferOutcome(conv.raw) ?? "NOT_SCHEDULED";
+  // Cria interações sequencialmente em chunks pequenos.
+  // Razão: anonymizeWithNer pode chamar Haiku — paralelismo descontrolado
+  // estoura rate limit. Chunk de 3 mantém throughput sem riscos.
+  const CONCURRENCY = 3;
+  const results: PromiseSettledResult<unknown>[] = [];
+  for (let i = 0; i < conversations.length; i += CONCURRENCY) {
+    const chunk = conversations.slice(i, i + CONCURRENCY);
+    const chunkResults = await Promise.allSettled(
+      chunk.map(async (conv) => {
+        const { text: transcript } = await anonymizeWithNer(conv.raw);
+        const finalOutcome: ConvOutcome =
+          outcome ?? inferOutcome(conv.raw) ?? "NOT_SCHEDULED";
 
-      return prisma.successfulInteraction.create({
-        data: {
-          category: category as ServiceCategory,
-          transcript,
-          outcome: finalOutcome,
-          status: "PENDING_REVIEW",
-        },
-      });
-    })
-  );
+        return prisma.successfulInteraction.create({
+          data: {
+            category: category as ServiceCategory,
+            transcript,
+            outcome: finalOutcome,
+            status: "PENDING_REVIEW",
+          },
+        });
+      })
+    );
+    results.push(...chunkResults);
+  }
 
-  const succeeded = created.filter((r) => r.status === "fulfilled").length;
-  const failed    = created.filter((r) => r.status === "rejected").length;
+  const succeeded = results.filter((r) => r.status === "fulfilled").length;
+  const failed    = results.filter((r) => r.status === "rejected").length;
 
   return NextResponse.json({
     conversationsFound: conversations.length,

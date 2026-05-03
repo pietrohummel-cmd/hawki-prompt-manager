@@ -29,7 +29,8 @@ export type OperationType =
   | "pipeline_analyze"
   | "pipeline_fix"
   | "interaction_score"
-  | "knowledge_distill";
+  | "knowledge_distill"
+  | "transcript_anonymize";
 
 export interface UsageData {
   input_tokens: number;
