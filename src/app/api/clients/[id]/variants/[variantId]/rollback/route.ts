@@ -38,6 +38,35 @@ export async function POST(_req: Request, { params }: Params) {
       return NextResponse.json({ error: "Variante sem versão promovida registrada" }, { status: 422 });
     }
 
+    // Bloqueia rollback quando não há baseline: desativar sem reativar deixaria o
+    // cliente sem nenhuma versão ativa, quebrando toda geração de prompt.
+    if (!variant.baselineVersionId) {
+      return NextResponse.json(
+        {
+          error:
+            "Variante criada sem baseline registrado — rollback automático não disponível. " +
+            "Ative manualmente outra versão na aba Versões antes de desativar esta.",
+        },
+        { status: 422 }
+      );
+    }
+
+    // Verifica se o baseline ainda existe no banco antes de prosseguir
+    const baselineExists = await prisma.promptVersion.findUnique({
+      where: { id: variant.baselineVersionId },
+      select: { id: true },
+    });
+    if (!baselineExists) {
+      return NextResponse.json(
+        {
+          error:
+            "A versão baseline foi removida e não pode ser restaurada. " +
+            "Ative outra versão manualmente na aba Versões.",
+        },
+        { status: 422 }
+      );
+    }
+
     await prisma.$transaction(async (tx) => {
       // Desativa a versão promovida
       await tx.promptVersion.update({
@@ -45,13 +74,11 @@ export async function POST(_req: Request, { params }: Params) {
         data: { isActive: false },
       });
 
-      // Reativa o baseline (se ainda existir)
-      if (variant.baselineVersionId) {
-        await tx.promptVersion.update({
-          where: { id: variant.baselineVersionId },
-          data: { isActive: true },
-        });
-      }
+      // Reativa o baseline — garantido de existir após a checagem acima
+      await tx.promptVersion.update({
+        where: { id: variant.baselineVersionId! },
+        data: { isActive: true },
+      });
 
       await tx.promptVariant.update({
         where: { id: variantId },

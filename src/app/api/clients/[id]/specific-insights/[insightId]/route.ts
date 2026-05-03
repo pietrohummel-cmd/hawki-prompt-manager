@@ -41,12 +41,20 @@ export async function PATCH(req: Request, { params }: Params) {
     // Ativação + arquivamento das demais em uma única transação.
     // Sem a transação, uma janela de corrida entre updateMany e update poderia
     // deixar dois insights ACTIVE simultaneamente para o mesmo (clientId, category).
+    //
+    // IMPORTANTE: usar a categoria *efetiva após o update* no updateMany.
+    // Se o operador envia { category: "IMPLANTES", status: "ACTIVE" } para um insight
+    // que estava em category: "ORTODONTIA", o arquivamento deve mirar "IMPLANTES",
+    // não "ORTODONTIA" — caso contrário um ACTIVE existente em "IMPLANTES" não é
+    // arquivado e ficamos com dois simultâneos na nova categoria.
+    const effectiveCategory = body.category !== undefined ? body.category : existing.category;
+
     const updated = await prisma.$transaction(async (tx) => {
       if (body.status === "ACTIVE" && existing.status !== "ACTIVE") {
         await tx.clientSpecificInsight.updateMany({
           where: {
             clientId,
-            category: existing.category,
+            category: effectiveCategory,
             status: "ACTIVE",
             id: { not: insightId },
           },
