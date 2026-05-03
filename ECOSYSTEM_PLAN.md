@@ -216,7 +216,7 @@ enum ClientInsightSource { MANUAL DISTILLED_FROM_OWN_HISTORY }
 ## Slice 3 — A/B variant infrastructure (local-first) ✅ concluída (2026-05-03)
 
 **Commits:**
-- (ver abaixo) — Slice 3: PromptVariant schema + test/promote/rollback endpoints + UI /clients/[id]/variants
+- `1f39f86` — Slice 3: PromptVariant schema + test/promote/rollback endpoints + UI /clients/[id]/variants
 
 **Objetivo:** validar mudanças de prompt antes de deployar, usando regressão como proxy de produção. Quando Slice 4 acontecer, infra está pronta para produção.
 
