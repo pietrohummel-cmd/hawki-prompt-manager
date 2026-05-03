@@ -15,6 +15,7 @@ import Anthropic from "@anthropic-ai/sdk";
 import { prisma } from "@/lib/prisma";
 import { CATEGORY_LABELS, MAX_INSIGHTS_PER_INJECTION } from "@/lib/intelligence-constants";
 import { logUsage } from "@/lib/usage-logger";
+import { computeRankingScore } from "@/lib/interaction-scorer";
 import type { ServiceCategory } from "@/generated/prisma";
 
 function getAnthropic() {
@@ -99,19 +100,32 @@ export interface DistillResult {
  * Arquiva DRAFTs anteriores (não toca em ACTIVE — promoção é atômica via batch endpoint).
  */
 export async function distillKnowledge(category: ServiceCategory): Promise<DistillResult> {
-  // 1 — Busca top-20 aprovadas, priorizando as com maior scoreQuality
-  const interactions = await prisma.successfulInteraction.findMany({
+  // 1 — Busca aprovadas com outcome incluído. Ordenação inicial por scoreQuality
+  //     para o caso degenerado (zero outcome registrado), mas o ranking final
+  //     considera outcome real via computeRankingScore (ground truth > LLM).
+  const candidates = await prisma.successfulInteraction.findMany({
     where: { category, status: "APPROVED" },
     orderBy: [
       { scoreQuality: { sort: "desc", nulls: "last" } },
       { uploadedAt: "desc" },
     ],
-    take: 20,
+    include: { conversationOutcome: true },
+    take: 60,  // pega 3x o limite para reordenar por ranking score
   });
 
-  if (interactions.length === 0) {
+  if (candidates.length === 0) {
     return { category, batchId: null, sourceCount: 0, insightsCreated: 0, draftBatchesArchived: 0 };
   }
+
+  // Reordena por ranking score (LLM + outcome) e pega top-20
+  const interactions = candidates
+    .map((i) => ({
+      interaction: i,
+      ranking: computeRankingScore(i.scoreQuality, i.conversationOutcome),
+    }))
+    .sort((a, b) => b.ranking - a.ranking)
+    .slice(0, 20)
+    .map((entry) => entry.interaction);
 
   // 2 — Extrai insights via LLM
   const rawInsights = await extractInsights(

@@ -45,6 +45,25 @@ interface DistillResult {
   draftBatchesArchived: number;
 }
 
+// ─── Ranking score (espelha interaction-scorer.computeRankingScore) ──────────
+// Replicado client-side para evitar bundlar Anthropic/Prisma no cliente.
+// Lógica deve ficar idêntica à do servidor — se mudar lá, mudar aqui também.
+
+function computeRankingScoreClient(
+  scoreQuality: number | null,
+  outcome: ConversationOutcome | null
+): number {
+  const base = scoreQuality ?? 0.5;
+  if (!outcome) return base;
+  let adj = 0;
+  if (outcome.revenueCents !== null && outcome.revenueCents > 0) adj += 0.20;
+  else if (outcome.treatmentClosed === true) adj += 0.15;
+  else if (outcome.treatmentClosed === false) adj -= 0.10;
+  if (outcome.showedUp === true) adj += 0.05;
+  else if (outcome.showedUp === false) adj -= 0.15;
+  return Math.min(1, Math.max(0, base + adj));
+}
+
 // ─── Score bar helper ─────────────────────────────────────────────────────────
 
 function ScoreBar({ value, label }: { value: number | null; label: string }) {
@@ -738,6 +757,20 @@ export default function InteligenciaPage() {
                         <ScoreBar value={item.scoreQuality}   label="Qualidade" />
                         <ScoreBar value={item.scoreTone}      label="Tom" />
                         <ScoreBar value={item.scoreObjection} label="Objeções" />
+                        {item.conversationOutcome && item.scoreQuality !== null && (() => {
+                          const ranking = computeRankingScoreClient(item.scoreQuality, item.conversationOutcome);
+                          const delta = ranking - item.scoreQuality;
+                          const deltaPct = Math.round(delta * 100);
+                          return (
+                            <div className="pt-1 mt-1 border-t border-dashed border-[var(--border)]/60 flex items-center justify-between text-[10px]">
+                              <span className="text-[var(--text-disabled)]">Ranking ajustado por outcome:</span>
+                              <span className={`font-medium ${delta > 0 ? "text-green-500" : delta < 0 ? "text-red-400" : "text-[var(--text-muted)]"}`}>
+                                {Math.round(ranking * 100)}%
+                                {deltaPct !== 0 && ` (${deltaPct > 0 ? "+" : ""}${deltaPct}%)`}
+                              </span>
+                            </div>
+                          );
+                        })()}
                       </div>
                     )}
                     {item.status === "APPROVED" && item.scoreQuality === null && (

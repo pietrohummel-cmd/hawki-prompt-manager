@@ -97,3 +97,54 @@ export async function scoreInteraction(interactionId: string): Promise<ScoreResu
 
   return scores;
 }
+
+// ─── Score recalibrado por outcome (ground truth) ─────────────────────────────
+
+/**
+ * Sinal mínimo de outcome necessário para calcular o ranking adjustado.
+ * Espelha os campos de ConversationOutcome — fica desacoplado do tipo Prisma
+ * para permitir que callers passem dados parciais.
+ */
+export interface OutcomeSignal {
+  scheduledAt:     Date | string | null;
+  showedUp:        boolean | null;
+  treatmentClosed: boolean | null;
+  revenueCents:    number | null;
+}
+
+/**
+ * Recalibra scoreQuality por outcome real. A LLM dá uma estimativa baseada
+ * só na conversa; o outcome traz ground truth. Conversa que pareceu boa mas
+ * o paciente não fechou tratamento deve cair no ranking; conversa que pareceu
+ * média mas gerou receita deve subir.
+ *
+ * Ajustes (somatórios, depois clamp em [0, 1]):
+ *   +0.20 se revenueCents > 0       (sinal mais forte: dinheiro real)
+ *   +0.15 se treatmentClosed = true (fechou mas sem receita registrada)
+ *   -0.10 se treatmentClosed = false
+ *   +0.05 se showedUp = true        (apareceu mas não fechou)
+ *   -0.15 se showedUp = false       (no-show forte penalty)
+ *   +0.00 caso só haja scheduledAt  (intenção sem confirmação)
+ *
+ * Sem outcome → retorna scoreQuality intacto.
+ */
+export function computeRankingScore(
+  scoreQuality: number | null,
+  outcome: OutcomeSignal | null
+): number {
+  const base = scoreQuality ?? 0.5;
+  if (!outcome) return base;
+
+  let adj = 0;
+  if (outcome.revenueCents !== null && outcome.revenueCents > 0) {
+    adj += 0.20;
+  } else if (outcome.treatmentClosed === true) {
+    adj += 0.15;
+  } else if (outcome.treatmentClosed === false) {
+    adj -= 0.10;
+  }
+  if (outcome.showedUp === true) adj += 0.05;
+  else if (outcome.showedUp === false) adj -= 0.15;
+
+  return Math.min(1, Math.max(0, base + adj));
+}
