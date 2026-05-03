@@ -171,7 +171,7 @@ enum OutcomeSource {
 ## Slice 2 — Camada per-clinic ✅ concluída (2026-05-02)
 
 **Commits:**
-- (ver abaixo) — Slice 2: ClientSpecificInsight schema + endpoints + UI /clients/[id]/insights + injeção em duas camadas
+- `eb8ca2b` — Slice 2: ClientSpecificInsight schema + endpoints + UI /clients/[id]/insights + injeção em duas camadas
 
 **Objetivo:** segundo nível de conhecimento que pertence à clínica específica. Cria switching cost real — sair do Sofia significa perder a personalidade acumulada.
 
