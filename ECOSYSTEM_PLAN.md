@@ -108,7 +108,13 @@ Depende de adapters para sistemas de gestão odontológica.
 
 ---
 
-## Slice 1 — Outcome tracking
+## Slice 1 — Outcome tracking ✅ concluída (2026-05-03)
+
+**Commits:**
+- `696f3b0` — Slice 1.1: schema ConversationOutcome + endpoints PUT/GET/DELETE + OutcomeModal + badge na lista
+- `36b240a` — Slice 1.2: computeRankingScore (score recalibrado por outcome real, ground truth > LLM)
+- (próximo)  — Slice 1.3: dashboard /inteligencia/impacto + KPIs globais + funil por categoria
+
 
 **Objetivo:** conectar conversa a desfecho real. Item de maior impacto defensivo do plano.
 
