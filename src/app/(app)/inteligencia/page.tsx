@@ -1,12 +1,26 @@
 "use client";
 
 import { useEffect, useState, useCallback, useMemo } from "react";
-import { Upload, CheckCircle, XCircle, Clock, Filter, ChevronDown, ChevronUp, Sparkles, Zap, FlaskConical, Files, FileText, Users } from "lucide-react";
+import { Upload, CheckCircle, XCircle, Clock, Filter, ChevronDown, ChevronUp, Sparkles, Zap, FlaskConical, Files, FileText, Users, Target, DollarSign } from "lucide-react";
 import { CATEGORY_LABELS, CATEGORY_KEYS } from "@/lib/intelligence-constants";
 import { extractParticipants } from "@/lib/whatsapp-parser";
+import { OutcomeModal } from "@/components/outcome-modal";
 import type { ServiceCategory, InteractionStatus, ConvOutcome } from "@/generated/prisma";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
+
+interface ConversationOutcome {
+  id: string;
+  scheduledAt:     string | null;
+  appointmentDate: string | null;
+  showedUp:        boolean | null;
+  treatmentClosed: boolean | null;
+  revenueCents:    number | null;
+  source: string;
+  notes: string | null;
+  enteredAt: string;
+  updatedAt: string;
+}
 
 interface Interaction {
   id: string;
@@ -20,6 +34,7 @@ interface Interaction {
   scoreObjection: number | null;
   uploadedAt: string;
   reviewedAt: string | null;
+  conversationOutcome: ConversationOutcome | null;
 }
 
 interface DistillResult {
@@ -104,6 +119,9 @@ export default function InteligenciaPage() {
   // Distill
   const [distilling, setDistilling] = useState<ServiceCategory | null>(null);
   const [distillResult, setDistillResult] = useState<DistillResult | null>(null);
+
+  // Outcome modal
+  const [outcomeModalFor, setOutcomeModalFor] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -636,6 +654,32 @@ export default function InteligenciaPage() {
                       }`}>
                         {OUTCOME_LABELS[item.outcome]}
                       </span>
+                      {/* Badge de outcome real (ground truth) */}
+                      {item.conversationOutcome && (
+                        <span
+                          className={`text-xs px-1.5 py-0.5 rounded-full border flex items-center gap-1 ${
+                            item.conversationOutcome.revenueCents && item.conversationOutcome.revenueCents > 0
+                              ? "border-[var(--accent)]/40 bg-[var(--accent)]/10 text-[var(--accent)]"
+                              : item.conversationOutcome.showedUp === false || item.conversationOutcome.treatmentClosed === false
+                              ? "border-red-400/30 bg-red-400/10 text-red-400"
+                              : "border-amber-400/30 bg-amber-400/10 text-amber-500"
+                          }`}
+                          title="Outcome real registrado"
+                        >
+                          <Target size={10} />
+                          {item.conversationOutcome.revenueCents && item.conversationOutcome.revenueCents > 0
+                            ? `R$ ${(item.conversationOutcome.revenueCents / 100).toLocaleString("pt-BR", { minimumFractionDigits: 2 })}`
+                            : item.conversationOutcome.treatmentClosed
+                            ? "Fechou"
+                            : item.conversationOutcome.showedUp === true
+                            ? "Apareceu"
+                            : item.conversationOutcome.showedUp === false
+                            ? "Não apareceu"
+                            : item.conversationOutcome.scheduledAt
+                            ? "Agendado"
+                            : "Outcome registrado"}
+                        </span>
+                      )}
                       <span className="text-xs text-[var(--text-disabled)]">
                         {new Date(item.uploadedAt).toLocaleDateString("pt-BR")}
                       </span>
@@ -644,6 +688,17 @@ export default function InteligenciaPage() {
 
                   {/* Actions */}
                   <div className="flex items-center gap-1.5 shrink-0">
+                    <button
+                      onClick={() => setOutcomeModalFor(item.id)}
+                      title={item.conversationOutcome ? "Editar outcome" : "Adicionar outcome"}
+                      className={`p-1.5 rounded-lg transition press ${
+                        item.conversationOutcome
+                          ? "text-[var(--accent)] hover:bg-[var(--accent)]/10"
+                          : "text-[var(--text-muted)] hover:bg-[var(--surface-hover)]"
+                      }`}
+                    >
+                      <Target size={14} />
+                    </button>
                     {item.status === "PENDING_REVIEW" && (
                       <>
                         <button
@@ -688,6 +743,55 @@ export default function InteligenciaPage() {
                     {item.status === "APPROVED" && item.scoreQuality === null && (
                       <p className="text-[10px] text-[var(--text-disabled)] italic">Score sendo calculado...</p>
                     )}
+                    {/* Outcome real (ground truth) */}
+                    {item.conversationOutcome && (
+                      <div className="space-y-1 pb-2 border-b border-[var(--border)]">
+                        <div className="flex items-center justify-between">
+                          <p className="text-[10px] font-semibold text-[var(--text-disabled)] uppercase tracking-wide flex items-center gap-1">
+                            <Target size={10} />
+                            Outcome real
+                          </p>
+                          <button
+                            onClick={() => setOutcomeModalFor(item.id)}
+                            className="text-[10px] text-[var(--accent)] hover:underline"
+                          >
+                            Editar
+                          </button>
+                        </div>
+                        <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-xs text-[var(--text-secondary)]">
+                          {item.conversationOutcome.scheduledAt && (
+                            <span>📅 Agendado: {new Date(item.conversationOutcome.scheduledAt).toLocaleDateString("pt-BR")}</span>
+                          )}
+                          {item.conversationOutcome.appointmentDate && (
+                            <span>🗓️ Consulta: {new Date(item.conversationOutcome.appointmentDate).toLocaleDateString("pt-BR")}</span>
+                          )}
+                          {item.conversationOutcome.showedUp !== null && (
+                            <span>{item.conversationOutcome.showedUp ? "✅" : "❌"} {item.conversationOutcome.showedUp ? "Apareceu" : "Não apareceu"}</span>
+                          )}
+                          {item.conversationOutcome.treatmentClosed !== null && (
+                            <span>{item.conversationOutcome.treatmentClosed ? "✅" : "❌"} {item.conversationOutcome.treatmentClosed ? "Fechou tratamento" : "Não fechou"}</span>
+                          )}
+                          {item.conversationOutcome.revenueCents !== null && item.conversationOutcome.revenueCents > 0 && (
+                            <span className="col-span-2 flex items-center gap-1 text-[var(--accent)] font-medium">
+                              <DollarSign size={11} />
+                              R$ {(item.conversationOutcome.revenueCents / 100).toLocaleString("pt-BR", { minimumFractionDigits: 2 })}
+                            </span>
+                          )}
+                          {item.conversationOutcome.notes && (
+                            <span className="col-span-2 italic text-[var(--text-muted)]">&quot;{item.conversationOutcome.notes}&quot;</span>
+                          )}
+                        </div>
+                      </div>
+                    )}
+                    {!item.conversationOutcome && item.status === "APPROVED" && (
+                      <button
+                        onClick={() => setOutcomeModalFor(item.id)}
+                        className="text-[11px] text-[var(--accent)] hover:underline flex items-center gap-1 self-start"
+                      >
+                        <Target size={11} />
+                        Adicionar outcome real
+                      </button>
+                    )}
                     <p className="text-xs font-mono whitespace-pre-wrap text-[var(--text-secondary)] leading-relaxed max-h-72 overflow-y-auto">
                       {item.transcript}
                     </p>
@@ -725,6 +829,15 @@ export default function InteligenciaPage() {
             Próxima
           </button>
         </div>
+      )}
+
+      {/* Outcome modal */}
+      {outcomeModalFor && (
+        <OutcomeModal
+          interactionId={outcomeModalFor}
+          onClose={() => setOutcomeModalFor(null)}
+          onSaved={load}
+        />
       )}
     </div>
   );

@@ -114,6 +114,15 @@ enum KnowledgeStatus {
   ARCHIVED
 }
 
+enum OutcomeSource {
+  MANUAL              // admin digitou no painel
+  CRM_DENTAL_OFFICE
+  CRM_CLINICORP
+  CRM_EAI_DOCTOR
+  CRM_OTHER
+  API_WEBHOOK         // Sofia ou cliente posta direto via webhook
+}
+
 // ─────────────────────────────────────────────
 // Client — dados do cliente (clínica)
 // ─────────────────────────────────────────────
@@ -386,7 +395,7 @@ model SuccessfulInteraction {
   // SEM clientId — dados anônimos e reutilizáveis entre clientes
   category       ServiceCategory
   transcript     String            @db.Text   // texto anonimizado (sem clínica/nome)
-  outcome        ConvOutcome                  // SCHEDULED | NOT_SCHEDULED | LOST
+  outcome        ConvOutcome                  // SCHEDULED | NOT_SCHEDULED | LOST (sinal raso da conversa)
   scoreQuality   Float?                       // 0–1: qualidade geral avaliada por LLM
   scoreTone      Float?                       // 0–1: adequação do tom
   scoreObjection Float?                       // 0–1: handling de objeções
@@ -395,7 +404,44 @@ model SuccessfulInteraction {
   reviewNote     String?           @db.Text
   uploadedAt     DateTime          @default(now())
 
+  // Outcome real (ground truth do mundo): preenchido manualmente ou via CRM/webhook.
+  // Relação 1:1 — uma interação tem no máximo um outcome consolidado.
+  conversationOutcome ConversationOutcome?
+
   @@index([category, status])
+}
+
+// ─────────────────────────────────────────────
+// ConversationOutcome — desfecho real (ground truth) de uma interação
+// Modelo de evento: aceita updates incrementais ao longo do tempo
+// (scheduledAt → appointmentDate → showedUp → treatmentClosed → revenueCents).
+// Origem: MANUAL (curador digita) ou CRM/webhook quando integração estiver ativa.
+// ─────────────────────────────────────────────
+
+model ConversationOutcome {
+  id              String                @id @default(cuid())
+  interactionId   String                @unique
+  interaction     SuccessfulInteraction @relation(fields: [interactionId], references: [id], onDelete: Cascade)
+
+  // Funil de conversão — preenchidos progressivamente
+  scheduledAt     DateTime?      // quando o agendamento foi confirmado
+  appointmentDate DateTime?      // data marcada da consulta
+  showedUp        Boolean?       // paciente apareceu no horário?
+  treatmentClosed Boolean?       // fechou tratamento depois da primeira consulta?
+  revenueCents    Int?           // receita real em centavos (R$ 4500,00 → 450000)
+
+  source          OutcomeSource
+  notes           String?        @db.Text
+
+  // Auditoria
+  enteredAt       DateTime       @default(now())
+  enteredBy       String?        // Clerk userId
+  updatedAt       DateTime       @updatedAt
+  updatedBy       String?        // Clerk userId do último update
+
+  @@index([source])
+  @@index([showedUp])
+  @@index([treatmentClosed])
 }
 
 // ─────────────────────────────────────────────

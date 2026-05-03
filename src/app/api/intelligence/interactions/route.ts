@@ -44,6 +44,7 @@ export async function GET(request: Request) {
         orderBy: { uploadedAt: "desc" },
         skip: (page - 1) * pageSize,
         take: pageSize,
+        include: { conversationOutcome: true },
       }),
       prisma.successfulInteraction.count({ where }),
     ]);
