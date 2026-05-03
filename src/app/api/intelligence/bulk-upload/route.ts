@@ -5,9 +5,12 @@
  * anonimiza cada uma e cria SuccessfulInteraction em batch.
  *
  * Corpo (JSON):
- *   rawText:  string  — texto completo da exportação
- *   category: ServiceCategory
- *   outcome?: ConvOutcome  — aplicado a todas as conversas do lote (pode deixar vazio)
+ *   rawText:               string                  — texto completo da exportação
+ *   category:              ServiceCategory
+ *   outcome?:              ConvOutcome             — aplicado a todas as conversas do lote
+ *   operatorIdentifiers?:  string[]                — nomes que correspondem ao operador da
+ *                                                    clínica. Marcados como [SOFIA] no parser;
+ *                                                    demais ficam como [PACIENTE].
  */
 
 import { auth, currentUser } from "@clerk/nextjs/server";
@@ -26,6 +29,7 @@ const schema = z.object({
     "PERIODONTIA","ENDODONTIA","PEDIATRIA","PROTESE","CIRURGIA","OUTROS",
   ]),
   outcome: z.enum(["SCHEDULED","NOT_SCHEDULED","LOST"]).optional(),
+  operatorIdentifiers: z.array(z.string().min(1)).optional(),
 });
 
 export async function POST(request: Request) {
@@ -46,10 +50,11 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Dados inválidos", details: parsed.error.flatten() }, { status: 400 });
   }
 
-  const { rawText, category, outcome } = parsed.data;
+  const { rawText, category, outcome, operatorIdentifiers } = parsed.data;
 
-  // Parseia em conversas individuais
-  const conversations = parseWhatsAppExport(rawText);
+  // Parseia em conversas individuais; se operatorIdentifiers presente, papéis
+  // são marcados explicitamente (resolve achado do Codex sobre inversão de papel)
+  const conversations = parseWhatsAppExport(rawText, operatorIdentifiers);
 
   if (conversations.length === 0) {
     return NextResponse.json(

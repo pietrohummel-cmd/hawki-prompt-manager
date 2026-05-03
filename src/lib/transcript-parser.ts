@@ -60,11 +60,19 @@ export function anonymizeTranscript(raw: string): string {
   text = text.replace(/\[\d{1,2}\/\d{1,2}\/\d{2,4}[,\s]+\d{1,2}:\d{2}(?::\d{2})?\s?(?:AM|PM)?\]/g, "");
 
   // Remove prefixo de remetente WhatsApp: "João Silva: " ou "Clínica X: "
-  // Substituído por tag genérica de turno
-  text = text.replace(/^([^:\n]{1,50}):(\s)/gm, (_, name) => {
-    const lower = name.toLowerCase();
-    // Heurística: se parece operador (sofia, atendente, clínica) → [SOFIA]
-    if (/sofia|atendente|clínica|clinica|assistente|bot|ia/i.test(lower)) {
+  // Substituído por tag genérica de turno.
+  //
+  // IMPORTANTE: linhas que JÁ vêm pré-anotadas pelo whatsapp-parser
+  // (ex: "[SOFIA]: ..." ou "[PACIENTE]: ...") são preservadas — o
+  // operador foi marcado explicitamente no upload, não re-classificar.
+  text = text.replace(/^([^:\n]{1,50}):(\s)/gm, (full, name) => {
+    const trimmed = name.trim();
+    if (trimmed === "[SOFIA]" || trimmed === "[PACIENTE]") {
+      return full;  // já anotado, não toca
+    }
+    const lower = trimmed.toLowerCase();
+    // Fallback heurístico para uploads single (sem operador explícito)
+    if (/sofia|atendente|cl[ií]nica|assistente|bot|\bia\b|recep/i.test(lower)) {
       return "[SOFIA]: ";
     }
     return "[PACIENTE]: ";

@@ -1,8 +1,9 @@
 "use client";
 
-import { useEffect, useState, useCallback } from "react";
-import { Upload, CheckCircle, XCircle, Clock, Filter, ChevronDown, ChevronUp, Sparkles, Zap, FlaskConical, Files, FileText } from "lucide-react";
+import { useEffect, useState, useCallback, useMemo } from "react";
+import { Upload, CheckCircle, XCircle, Clock, Filter, ChevronDown, ChevronUp, Sparkles, Zap, FlaskConical, Files, FileText, Users } from "lucide-react";
 import { CATEGORY_LABELS, CATEGORY_KEYS } from "@/lib/intelligence-constants";
+import { extractParticipants } from "@/lib/whatsapp-parser";
 import type { ServiceCategory, InteractionStatus, ConvOutcome } from "@/generated/prisma";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -86,9 +87,16 @@ export default function InteligenciaPage() {
   const [bulkFileName, setBulkFileName] = useState<string | null>(null);
   const [bulkCategory, setBulkCategory] = useState<ServiceCategory>("IMPLANTES");
   const [bulkOutcome, setBulkOutcome] = useState<ConvOutcome | "">("");
+  const [bulkOperators, setBulkOperators] = useState<string[]>([]);  // nomes marcados como operador
   const [bulkUploading, setBulkUploading] = useState(false);
   const [bulkResult, setBulkResult] = useState<{ conversationsFound: number; created: number; failed: number } | null>(null);
   const [bulkError, setBulkError] = useState<string | null>(null);
+
+  // Participantes detectados a partir do texto bulk (recalculados quando texto muda)
+  const bulkParticipants = useMemo(() => {
+    if (!bulkText.trim() || bulkText.length < 50) return [];
+    return extractParticipants(bulkText).slice(0, 12); // limita 12 para UX
+  }, [bulkText]);
 
   // Review
   const [reviewing, setReviewing] = useState<string | null>(null);
@@ -194,6 +202,10 @@ export default function InteligenciaPage() {
 
   async function handleBulkUpload(e: React.FormEvent) {
     e.preventDefault();
+    if (bulkParticipants.length > 0 && bulkOperators.length === 0) {
+      setBulkError("Marque ao menos um participante como operador antes de enviar.");
+      return;
+    }
     setBulkError(null);
     setBulkResult(null);
     setBulkUploading(true);
@@ -205,6 +217,7 @@ export default function InteligenciaPage() {
           rawText: bulkText,
           category: bulkCategory,
           outcome: bulkOutcome || undefined,
+          operatorIdentifiers: bulkOperators.length > 0 ? bulkOperators : undefined,
         }),
       });
       const data = await res.json();
@@ -212,6 +225,7 @@ export default function InteligenciaPage() {
       setBulkResult(data);
       setBulkText("");
       setBulkFileName(null);
+      setBulkOperators([]);
       load();
     } catch (err) {
       setBulkError(err instanceof Error ? err.message : "Erro desconhecido");
@@ -226,12 +240,18 @@ export default function InteligenciaPage() {
     setBulkFileName(file.name);
     setBulkError(null);
     setBulkResult(null);
+    setBulkOperators([]);  // novo arquivo → operador precisa ser remarcado
     const reader = new FileReader();
     reader.onload = (ev) => setBulkText((ev.target?.result as string) ?? "");
     reader.onerror = () => setBulkError("Não foi possível ler o arquivo.");
     reader.readAsText(file, "utf-8");
-    // Reset so the same file can be re-selected after clearing
     e.target.value = "";
+  }
+
+  function toggleOperator(name: string) {
+    setBulkOperators((prev) =>
+      prev.includes(name) ? prev.filter((n) => n !== name) : [...prev, name]
+    );
   }
 
   // ─── Render ────────────────────────────────────────────────────────────────
@@ -376,12 +396,54 @@ export default function InteligenciaPage() {
                 {/* Textarea fallback */}
                 <textarea
                   value={bulkText}
-                  onChange={(e) => { setBulkText(e.target.value); setBulkFileName(null); }}
+                  onChange={(e) => { setBulkText(e.target.value); setBulkFileName(null); setBulkOperators([]); }}
                   placeholder={"27/04/2024 14:32 - Paciente: Boa tarde, gostaria de informações sobre implantes\n27/04/2024 14:33 - Atendente: Olá! Claro, posso te ajudar..."}
                   rows={6}
                   className="w-full rounded-lg border border-[var(--border)] bg-[var(--background)] px-3 py-2 text-xs font-mono text-[var(--text-secondary)] placeholder:text-[var(--text-disabled)] focus:outline-none focus:ring-2 focus:ring-[var(--accent)] resize-none"
                 />
               </div>
+
+              {/* Marcação de operador — aparece quando há participantes detectados */}
+              {bulkParticipants.length > 0 && (
+                <div className="space-y-2">
+                  <div className="flex items-baseline justify-between gap-3">
+                    <label className="text-xs font-medium text-[var(--text-muted)] flex items-center gap-1.5">
+                      <Users size={12} />
+                      Quem é o operador da clínica?
+                    </label>
+                    <span className="text-[11px] text-[var(--text-disabled)]">
+                      Os demais serão tratados como paciente
+                    </span>
+                  </div>
+                  <div className="flex flex-wrap gap-1.5">
+                    {bulkParticipants.map((p) => {
+                      const selected = bulkOperators.includes(p.name);
+                      return (
+                        <button
+                          key={p.name}
+                          type="button"
+                          onClick={() => toggleOperator(p.name)}
+                          className={`flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium border transition ${
+                            selected
+                              ? "border-[var(--accent)] bg-[var(--accent)]/15 text-[var(--accent)]"
+                              : "border-[var(--border)] bg-[var(--surface)] text-[var(--text-muted)] hover:border-[var(--accent)]/40 hover:bg-[var(--surface-hover)]"
+                          }`}
+                        >
+                          {selected && <CheckCircle size={11} />}
+                          <span className="truncate max-w-[160px]">{p.name}</span>
+                          <span className="text-[10px] opacity-70">· {p.messageCount}</span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                  {bulkOperators.length === 0 && (
+                    <p className="text-[11px] text-amber-500">
+                      Nenhum operador marcado — selecione antes de processar.
+                    </p>
+                  )}
+                </div>
+              )}
+
               {bulkError && (
                 <p className="text-xs text-red-500">{bulkError}</p>
               )}
@@ -391,7 +453,7 @@ export default function InteligenciaPage() {
                 </button>
                 <button
                   type="submit"
-                  disabled={bulkUploading || !bulkText.trim()}
+                  disabled={bulkUploading || !bulkText.trim() || (bulkParticipants.length > 0 && bulkOperators.length === 0)}
                   className="flex items-center gap-2 px-4 py-2 text-sm font-medium rounded-lg bg-[var(--accent)] text-white hover:opacity-90 disabled:opacity-50 transition"
                 >
                   <Files size={14} />

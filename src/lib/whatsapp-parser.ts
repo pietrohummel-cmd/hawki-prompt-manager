@@ -69,10 +69,51 @@ function isSystemMessage(text: string): boolean {
 }
 
 /**
+ * Extrai a lista de remetentes únicos detectados no arquivo, ordenada
+ * por nº de mensagens (mais frequente primeiro). Usado pela UI para
+ * permitir que o operador seja marcado explicitamente antes do upload.
+ */
+export function extractParticipants(raw: string): { name: string; messageCount: number }[] {
+  const lines = raw.split(/\r?\n/);
+  const counts = new Map<string, number>();
+  for (const line of lines) {
+    const match = WA_LINE_RE.exec(line);
+    if (!match) continue;
+    const sender = match[5].trim();
+    const text = match[6].trim();
+    if (!sender || isSystemMessage(text) || isSystemMessage(sender)) continue;
+    counts.set(sender, (counts.get(sender) ?? 0) + 1);
+  }
+  return Array.from(counts.entries())
+    .map(([name, messageCount]) => ({ name, messageCount }))
+    .sort((a, b) => b.messageCount - a.messageCount);
+}
+
+function classifySender(sender: string, operatorIdentifiers?: string[]): "SOFIA" | "PACIENTE" {
+  // Caminho explícito: o usuário marcou quem é o operador no upload
+  if (operatorIdentifiers && operatorIdentifiers.length > 0) {
+    const normalized = sender.trim().toLowerCase();
+    const hit = operatorIdentifiers.some((op) => op.trim().toLowerCase() === normalized);
+    return hit ? "SOFIA" : "PACIENTE";
+  }
+  // Fallback heurístico (legacy): infere por substring de palavras-chave
+  return /sofia|atendente|cl[ií]nica|assistente|bot|\bia\b|recep/i.test(sender)
+    ? "SOFIA"
+    : "PACIENTE";
+}
+
+/**
  * Parseia o texto bruto de uma exportação do WhatsApp.
  * Retorna conversas agrupadas por sessão (gap > GAP_HOURS).
+ *
+ * @param raw                   Conteúdo do arquivo .txt exportado
+ * @param operatorIdentifiers   Lista de nomes de remetentes que são o operador.
+ *                              Se ausente, cai no fallback heurístico (palavras-chave).
  */
-export function parseWhatsAppExport(raw: string): WaConversation[] {
+export function parseWhatsAppExport(
+  raw: string,
+  operatorIdentifiers?: string[]
+): WaConversation[] {
   const lines = raw.split(/\r?\n/);
   const messages: WaMessage[] = [];
 
@@ -117,7 +158,7 @@ export function parseWhatsAppExport(raw: string): WaConversation[] {
     const gap = messages[i].timestampMs - messages[i - 1].timestampMs;
     if (gap > GAP_MS) {
       if (sessionMsgs.length >= MIN_MESSAGES) {
-        conversations.push(buildConversation(sessionMsgs));
+        conversations.push(buildConversation(sessionMsgs, operatorIdentifiers));
       }
       sessionMsgs = [messages[i]];
     } else {
@@ -125,15 +166,18 @@ export function parseWhatsAppExport(raw: string): WaConversation[] {
     }
   }
   if (sessionMsgs.length >= MIN_MESSAGES) {
-    conversations.push(buildConversation(sessionMsgs));
+    conversations.push(buildConversation(sessionMsgs, operatorIdentifiers));
   }
 
   return conversations;
 }
 
-function buildConversation(msgs: WaMessage[]): WaConversation {
+function buildConversation(msgs: WaMessage[], operatorIdentifiers?: string[]): WaConversation {
+  // Reconstrói o texto bruto com papéis já anotados — isso evita que a camada
+  // de anonymização precise inferir papel por substring de nome (que invertia
+  // papéis quando atendentes têm nomes próprios como "Mariana" ou "Dra. Ana").
   const raw = msgs
-    .map((m) => `[${m.sender}]: ${m.text}`)
+    .map((m) => `[${classifySender(m.sender, operatorIdentifiers)}]: ${m.text}`)
     .join("\n");
   return {
     messages: msgs,
