@@ -179,6 +179,7 @@ model Client {
   leadOriginTags      LeadOriginTag[]
   conversationSamples ConversationSample[]
   knowledgeArticles   ClientKnowledgeArticle[]
+  specificInsights    ClientSpecificInsight[]
 }
 
 // ─────────────────────────────────────────────
@@ -518,4 +519,39 @@ model ClientKnowledgeArticle {
   updatedAt DateTime @updatedAt
 
   @@unique([clientId, topic])
+}
+
+// ─────────────────────────────────────────────
+// ClientSpecificInsight — insights exclusivos de cada clínica
+// Segundo nível de conhecimento: tom, objeções e posicionamento específico da clínica.
+// Injetado APÓS o SpecialtyKnowledge cross-tenant no prompt de geração.
+// ─────────────────────────────────────────────
+
+enum ClientInsightSource {
+  MANUAL                    // admin cadastrou diretamente
+  DISTILLED_FROM_OWN_HISTORY // gerado a partir do histórico próprio da clínica
+}
+
+model ClientSpecificInsight {
+  id         String              @id @default(cuid())
+  clientId   String
+  client     Client              @relation(fields: [clientId], references: [id], onDelete: Cascade)
+
+  category   ServiceCategory?   // null = aplica-se a todas as especialidades da clínica
+  title      String             // rótulo curto para exibição na UI
+  insight    String             @db.Text  // o insight em si (injetado no prompt)
+  example    String?            @db.Text  // exemplo opcional: frase do paciente + resposta ideal
+
+  status     KnowledgeStatus    @default(DRAFT)
+
+  // Métricas de impacto (preenchidas quando Slice 4/5 estiverem ativos)
+  appearedInConversations Int   @default(0)
+  attributedRevenueCents  Int   @default(0)
+
+  source     ClientInsightSource
+  createdAt  DateTime            @default(now())
+  updatedAt  DateTime            @updatedAt
+
+  @@index([clientId, status])
+  @@index([clientId, category, status])
 }

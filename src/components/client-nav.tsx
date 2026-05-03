@@ -36,6 +36,7 @@ const tabs = [
   { label: "Simulação", href: (id: string) => `/clients/${id}/simulation` },
   { label: "Regressão", href: (id: string) => `/clients/${id}/regression` },
   { label: "KB",        href: (id: string) => `/clients/${id}/knowledge` },
+  { label: "Insights",  href: (id: string) => `/clients/${id}/insights` },
 ];
 
 interface PromptModule {

@@ -113,7 +113,7 @@ Depende de adapters para sistemas de gestão odontológica.
 **Commits:**
 - `696f3b0` — Slice 1.1: schema ConversationOutcome + endpoints PUT/GET/DELETE + OutcomeModal + badge na lista
 - `36b240a` — Slice 1.2: computeRankingScore (score recalibrado por outcome real, ground truth > LLM)
-- (próximo)  — Slice 1.3: dashboard /inteligencia/impacto + KPIs globais + funil por categoria
+- `f9ae99b` — Slice 1.3: dashboard /inteligencia/impacto + KPIs globais + funil por categoria
 
 
 **Objetivo:** conectar conversa a desfecho real. Item de maior impacto defensivo do plano.
@@ -168,30 +168,30 @@ enum OutcomeSource {
 
 ---
 
-## Slice 2 — Camada per-clinic
+## Slice 2 — Camada per-clinic ✅ concluída (2026-05-02)
+
+**Commits:**
+- (ver abaixo) — Slice 2: ClientSpecificInsight schema + endpoints + UI /clients/[id]/insights + injeção em duas camadas
 
 **Objetivo:** segundo nível de conhecimento que pertence à clínica específica. Cria switching cost real — sair do Sofia significa perder a personalidade acumulada.
 
-### Schema
+### Schema (implementado)
 
 ```prisma
 model ClientSpecificInsight {
-  id          String   @id @default(cuid())
-  clientId    String
-  client      Client   @relation(fields: [clientId], references: [id], onDelete: Cascade)
-
-  category    ServiceCategory?  // null = aplicável a todas
-  text        String   @db.Text
-  example     String?  @db.Text
-  status      KnowledgeStatus @default(DRAFT)
-
-  // Métricas de impacto
-  appearedInConversations Int @default(0)
-  attributedRevenueCents  Int @default(0)
-
-  source      ClientInsightSource  // MANUAL | DISTILLED_FROM_OWN_HISTORY
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  id         String              @id @default(cuid())
+  clientId   String
+  client     Client              @relation(...)
+  category   ServiceCategory?   // null = aplica-se a todas
+  title      String
+  insight    String              @db.Text
+  example    String?             @db.Text
+  status     KnowledgeStatus    @default(DRAFT)
+  appearedInConversations Int   @default(0)
+  attributedRevenueCents  Int   @default(0)
+  source     ClientInsightSource  // MANUAL | DISTILLED_FROM_OWN_HISTORY
+  createdAt  DateTime
+  updatedAt  DateTime            @updatedAt
 }
 
 enum ClientInsightSource { MANUAL DISTILLED_FROM_OWN_HISTORY }
@@ -199,19 +199,12 @@ enum ClientInsightSource { MANUAL DISTILLED_FROM_OWN_HISTORY }
 
 ### Tarefas
 
-1. Schema migration
-2. UI `/clients/[id]/knowledge` — gestão de insights da clínica
-3. Função `fetchClientSpecificKnowledge(clientId, categories)` em `knowledge-injector.ts`
-4. Injeção em **duas camadas** no `generate-prompt.ts`:
-   ```
-   ## INSIGHTS GERAIS DA CATEGORIA (cross-tenant)
-   [...do SpecialtyKnowledge ACTIVE...]
-
-   ## TOM E POSICIONAMENTO DESTA CLÍNICA
-   [...do ClientSpecificInsight ACTIVE da clínica...]
-   ```
-5. Migrações de dados: clínicas existentes começam com lista vazia (sem retroatividade)
-6. **Bonus:** botão "Destilar do meu histórico" — quando a clínica tem ≥20 conversas próprias aprovadas, gera insights só dela
+1. ✅ Schema migration + `prisma db push`
+2. ✅ Endpoints `GET/POST /api/clients/[id]/specific-insights` + `PATCH/DELETE /api/clients/[id]/specific-insights/[insightId]`
+3. ✅ UI `/clients/[id]/insights` — gestão de insights da clínica (nova aba no client-nav)
+4. ✅ Função `fetchClientSpecificKnowledge(clientId, categories)` em `knowledge-injector.ts`
+5. ✅ Injeção em **duas camadas** no `generate-prompt.ts` (cross-tenant + per-clinic em paralelo)
+6. ⬜ **Bonus:** botão "Destilar do meu histórico" — quando a clínica tem ≥20 conversas próprias aprovadas, gera insights só dela (Slice 2.1 futuro)
 
 ### Critério de pronto
 - 1 cliente piloto com 5 insights próprios cadastrados

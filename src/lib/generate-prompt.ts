@@ -3,7 +3,7 @@ import type { Client, ModuleKey } from "@/generated/prisma";
 import { MODULE_ORDER } from "@/lib/prompt-constants";
 import { logUsage } from "@/lib/usage-logger";
 import { SOFIA_GUIDELINES_CONDENSED } from "@/lib/sofia-guidelines";
-import { fetchRelevantKnowledge, formatKnowledgeBlock } from "@/lib/knowledge-injector";
+import { fetchRelevantKnowledge, fetchClientSpecificKnowledge, formatKnowledgeBlock } from "@/lib/knowledge-injector";
 
 export { MODULE_LABELS, MODULE_ORDER } from "@/lib/prompt-constants";
 
@@ -376,11 +376,12 @@ export async function generateClientPrompt(client: Client): Promise<{
   modules: Partial<Record<ModuleKey, string>>;
   knowledgeInjected: boolean;
 }> {
-  // Busca insights ACTIVE para as categorias do cliente — injetado antes da geração
-  const knowledgeText = await fetchRelevantKnowledge(
-    client.serviceCategories ?? []
-  );
-  const knowledgeBlock = formatKnowledgeBlock(knowledgeText);
+  // Busca insights ACTIVE nas duas camadas — injetados antes da geração
+  const [crossTenantText, clientSpecificText] = await Promise.all([
+    fetchRelevantKnowledge(client.serviceCategories ?? []),
+    fetchClientSpecificKnowledge(client.id, client.serviceCategories ?? []),
+  ]);
+  const knowledgeBlock = formatKnowledgeBlock(crossTenantText, clientSpecificText);
   const knowledgeInjected = knowledgeBlock.length > 0;
 
   const basePrompt = buildSystemPromptForGeneration(client);
