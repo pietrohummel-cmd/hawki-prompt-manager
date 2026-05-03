@@ -180,6 +180,7 @@ model Client {
   conversationSamples ConversationSample[]
   knowledgeArticles   ClientKnowledgeArticle[]
   specificInsights    ClientSpecificInsight[]
+  variants            PromptVariant[]
 }
 
 // ─────────────────────────────────────────────
@@ -205,6 +206,7 @@ model PromptVersion {
   modules             PromptModule[]
   tickets             CorrectionTicket[]
   conversationSamples ConversationSample[]
+  baselineFor         PromptVariant[]     @relation("VariantBaseline")
 
   @@unique([clientId, version])
 }
@@ -554,4 +556,61 @@ model ClientSpecificInsight {
 
   @@index([clientId, status])
   @@index([clientId, category, status])
+}
+
+// ─────────────────────────────────────────────
+// PromptVariant — candidato a novo prompt aguardando validação
+//
+// Fluxo: PENDING → TESTING → WON/LOST → (WON) PROMOTED → (rollback) ROLLED_BACK
+// A variante armazena o texto completo do prompt candidato.
+// Na promoção, parse + novo PromptVersion é criado e marcado isActive.
+// ─────────────────────────────────────────────
+
+enum VariantSource {
+  MANUAL              // admin criou o texto diretamente
+  INSIGHT_ACTIVATION  // gerado ao ativar um insight no corpus
+  TICKET_FIX          // saiu de um CorrectionTicket resolvido
+  DISTILLATION_BATCH  // saiu de um batch de destilação
+}
+
+enum VariantStatus {
+  PENDING    // criado, aguardando teste
+  TESTING    // regressão em andamento
+  WON        // passou no threshold — aguardando promoção manual
+  LOST       // não passou
+  PROMOTED   // virou PromptVersion ativa
+  ROLLED_BACK // foi revertido após promoção
+}
+
+model PromptVariant {
+  id                String         @id @default(cuid())
+  clientId          String
+  client            Client         @relation(fields: [clientId], references: [id], onDelete: Cascade)
+
+  // Versão que estava ativa quando a variante foi criada (para comparação e rollback)
+  baselineVersionId String?
+  baselineVersion   PromptVersion? @relation("VariantBaseline", fields: [baselineVersionId], references: [id], onDelete: SetNull)
+
+  variantPrompt     String         @db.Text  // prompt completo no formato ###MÓDULO:KEY###
+  source            VariantSource
+  description       String?
+
+  // Resultados de regressão local
+  regressionPassed  Int?
+  regressionFailed  Int?
+  regressionDelta   Float?         // pontos percentuais de melhoria vs baseline (-100..+100)
+
+  // Resultados de produção (Slice 4 — preenchidos depois)
+  productionTrafficPct Int?
+  conversationsTested  Int?
+  conversionDelta      Float?
+  outcomeDelta         Float?
+
+  status            VariantStatus  @default(PENDING)
+  createdAt         DateTime       @default(now())
+  promotedAt        DateTime?
+  rolledBackAt      DateTime?
+  promotedVersionId String?        // id da PromptVersion criada na promoção
+
+  @@index([clientId, status])
 }
