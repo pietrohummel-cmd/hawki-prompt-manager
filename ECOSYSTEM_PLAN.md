@@ -64,9 +64,14 @@ Depende de adapters para sistemas de gestão odontológica.
 
 ---
 
-## Slice 0 — Correções imediatas (instant)
+## Slice 0 — Correções imediatas ✅ concluída (2026-05-03)
 
 **Objetivo:** resolver os 3 achados do Codex antes de empilhar mais features. Fundação confiável é pré-requisito.
+
+**Commits:**
+- `53fc68e` — Slice 0.1: ativação atômica de lote (KnowledgeBatch)
+- `d41ca0a` — Slice 0.2: anonymização body-level via Haiku NER (com cache)
+- `825b119` — Slice 0.3: papel do operador explícito no bulk upload
 
 ### Tarefas
 
