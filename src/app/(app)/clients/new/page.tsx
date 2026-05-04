@@ -8,6 +8,7 @@ import { z } from "zod";
 import { parseOnboardingFile } from "@/lib/csv-parser";
 import { CATEGORY_LABELS, CATEGORY_KEYS } from "@/lib/intelligence-constants";
 import type { ParsedOnboardingData } from "@/types";
+import { Upload, Sparkles } from "lucide-react";
 
 const schema = z.object({
   name: z.string().min(1, "Obrigatório"),
@@ -132,6 +133,8 @@ export default function NewClientPage() {
   const [uploading, setUploading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [hasExistingPrompt, setHasExistingPrompt] = useState(false);
+  const [existingPromptText, setExistingPromptText] = useState("");
 
   const {
     register,
@@ -194,11 +197,24 @@ export default function NewClientPage() {
 
       const client = await res.json();
 
-      // Gera o primeiro prompt automaticamente — sem etapa extra para o usuário
-      const genRes = await fetch(`/api/clients/${client.id}/generate-prompt`, { method: "POST" });
-      if (!genRes.ok) {
-        const genErr = await genRes.json().catch(() => ({}));
-        throw new Error(genErr.error ?? "Cliente criado, mas falha ao gerar o prompt. Tente gerar manualmente na aba Prompt.");
+      if (hasExistingPrompt && existingPromptText.trim()) {
+        // Importa o prompt existente em vez de auto-gerar
+        const importRes = await fetch(`/api/clients/${client.id}/import-prompt`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ rawText: existingPromptText }),
+        });
+        if (!importRes.ok) {
+          const importErr = await importRes.json().catch(() => ({}));
+          throw new Error(importErr.error ?? "Cliente criado, mas falha ao importar o prompt. Tente importar manualmente na aba Prompt.");
+        }
+      } else {
+        // Gera o primeiro prompt automaticamente — sem etapa extra para o usuário
+        const genRes = await fetch(`/api/clients/${client.id}/generate-prompt`, { method: "POST" });
+        if (!genRes.ok) {
+          const genErr = await genRes.json().catch(() => ({}));
+          throw new Error(genErr.error ?? "Cliente criado, mas falha ao gerar o prompt. Tente gerar manualmente na aba Prompt.");
+        }
       }
 
       router.push(`/clients/${client.id}/prompt`);
@@ -518,6 +534,44 @@ export default function NewClientPage() {
           </div>
         </Section>
 
+        {/* Prompt existente */}
+        <div className="bg-[var(--surface)] border border-[var(--surface-border)] rounded-lg p-5">
+          <label className="flex items-center gap-3 cursor-pointer select-none">
+            <input
+              type="checkbox"
+              checked={hasExistingPrompt}
+              onChange={(e) => setHasExistingPrompt(e.target.checked)}
+              className="rounded border-[var(--border)] text-[var(--accent)] focus:ring-[var(--accent)]"
+            />
+            <span className="text-sm font-medium text-[var(--text-secondary)] flex items-center gap-2">
+              <Upload className="w-4 h-4 text-[var(--text-muted)]" />
+              Já tenho um prompt pronto para este cliente
+            </span>
+          </label>
+
+          {hasExistingPrompt && (
+            <div className="mt-4 space-y-2">
+              <p className="text-xs text-[var(--text-muted)]">
+                Cole o prompt completo abaixo. O sistema irá estruturá-lo nos módulos corretos automaticamente.
+                Se o prompt já usar marcadores <code className="bg-[var(--surface-raised)] px-1 rounded text-[var(--text-secondary)]">###MÓDULO:CHAVE###</code>, a estrutura será preservada.
+              </p>
+              <textarea
+                value={existingPromptText}
+                onChange={(e) => setExistingPromptText(e.target.value)}
+                rows={12}
+                placeholder="Cole aqui o prompt existente da clínica..."
+                className={input()}
+              />
+              {existingPromptText.trim().length > 0 && (
+                <p className="text-xs text-emerald-400 flex items-center gap-1">
+                  <Sparkles className="w-3 h-3" />
+                  {existingPromptText.trim().length} caracteres · pronto para importar
+                </p>
+              )}
+            </div>
+          )}
+        </div>
+
         {/* Erro */}
         {error && (
           <div className="bg-red-500/10 border border-red-500/30 text-red-400 text-sm px-4 py-3 rounded-lg">
@@ -532,7 +586,9 @@ export default function NewClientPage() {
             disabled={saving}
             className="press bg-[var(--accent)] hover:bg-[var(--accent-hover)] disabled:opacity-50 text-white font-medium text-sm px-6 py-2.5 rounded-md transition-colors"
           >
-            {saving ? "Criando e gerando prompt..." : "Salvar e gerar prompt →"}
+            {saving
+              ? hasExistingPrompt ? "Criando e importando prompt..." : "Criando e gerando prompt..."
+              : hasExistingPrompt ? "Salvar e importar prompt →" : "Salvar e gerar prompt →"}
           </button>
           <button
             type="button"
