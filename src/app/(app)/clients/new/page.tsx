@@ -8,7 +8,7 @@ import { z } from "zod";
 import { parseOnboardingFile } from "@/lib/csv-parser";
 import { CATEGORY_LABELS, CATEGORY_KEYS } from "@/lib/intelligence-constants";
 import type { ParsedOnboardingData } from "@/types";
-import { Upload, Sparkles } from "lucide-react";
+import { Upload, Sparkles, CheckCircle2, FileText } from "lucide-react";
 
 const schema = z.object({
   name: z.string().min(1, "Obrigatório"),
@@ -128,13 +128,23 @@ function mapParsedToForm(parsed: ParsedOnboardingData): Partial<FormData> {
 
 export default function NewClientPage() {
   const router = useRouter();
+
+  // CSV state
   const [csvPreview, setCsvPreview] = useState<ParsedOnboardingData | null>(null);
   const [csvUnmapped, setCsvUnmapped] = useState<Record<string, string>>({});
   const [uploading, setUploading] = useState(false);
+
+  // Prompt import state
+  const [existingPromptText, setExistingPromptText] = useState("");
+  const [extracting, setExtracting] = useState(false);
+  const [extractedCount, setExtractedCount] = useState(0);
+
+  // Form state
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [hasExistingPrompt, setHasExistingPrompt] = useState(false);
-  const [existingPromptText, setExistingPromptText] = useState("");
+
+  // Computed: se há texto colado, entramos no modo de importação
+  const hasExistingPrompt = existingPromptText.trim().length > 0;
 
   const {
     register,
@@ -146,10 +156,13 @@ export default function NewClientPage() {
     defaultValues: { assistantName: "Sofia" },
   });
 
+  // ─── Handlers ──────────────────────────────────────────────────────────────
+
   async function handleFileChange(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
     if (!file) return;
     setUploading(true);
+    setError(null);
     try {
       const results = await parseOnboardingFile(file);
       const first = results[0];
@@ -159,7 +172,6 @@ export default function NewClientPage() {
       setCsvPreview(first);
       setCsvUnmapped(first.unmapped);
 
-      // Preenche o formulário com os dados parseados
       (Object.keys(mapped) as (keyof FormData)[]).forEach((key) => {
         const val = mapped[key];
         if (val !== undefined) setValue(key, val as string);
@@ -172,11 +184,57 @@ export default function NewClientPage() {
     }
   }
 
+  async function handleExtractFromPrompt() {
+    if (!existingPromptText.trim()) return;
+    setExtracting(true);
+    setExtractedCount(0);
+    setError(null);
+    try {
+      const res = await fetch("/api/parse-prompt-to-client", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ rawText: existingPromptText }),
+      });
+
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({})) as { error?: string };
+        setError(err.error ?? "Erro ao extrair dados do prompt. Tente novamente.");
+        return;
+      }
+
+      const { fields, count } = await res.json() as {
+        fields: Partial<FormData> & { serviceCategories?: string[] };
+        count: number;
+      };
+
+      const { serviceCategories, ...rest } = fields;
+
+      // Preenche campos de texto
+      (Object.keys(rest) as (keyof typeof rest)[]).forEach((key) => {
+        const val = rest[key];
+        if (val !== undefined && val !== null && val !== "") {
+          setValue(key as keyof FormData, val as string);
+        }
+      });
+
+      // Preenche categorias (array de checkboxes)
+      if (serviceCategories?.length) {
+        setValue("serviceCategories", serviceCategories);
+      }
+
+      setExtractedCount(count);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Erro ao extrair dados do prompt.");
+    } finally {
+      setExtracting(false);
+    }
+  }
+
   async function onSubmit(data: FormData) {
     setSaving(true);
     setError(null);
     try {
-      // Remove campos de enum vazios antes de enviar; garante serviceCategories como array
+      // Remove campos de enum vazios; garante serviceCategories como array
       const payload = {
         ...Object.fromEntries(
           Object.entries(data).filter(([, v]) => v !== "" && v !== undefined)
@@ -191,29 +249,33 @@ export default function NewClientPage() {
       });
 
       if (!res.ok) {
-        const err = await res.json();
+        const err = await res.json() as { error?: string; detail?: string };
         throw new Error(err.detail ? `${err.error}: ${err.detail}` : (err.error ?? "Erro ao salvar cliente"));
       }
 
-      const client = await res.json();
+      const client = await res.json() as { id: string };
 
-      if (hasExistingPrompt && existingPromptText.trim()) {
-        // Importa o prompt existente em vez de auto-gerar
+      if (hasExistingPrompt) {
+        // Importa o prompt existente — sem geração desnecessária
         const importRes = await fetch(`/api/clients/${client.id}/import-prompt`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ rawText: existingPromptText }),
         });
         if (!importRes.ok) {
-          const importErr = await importRes.json().catch(() => ({}));
-          throw new Error(importErr.error ?? "Cliente criado, mas falha ao importar o prompt. Tente importar manualmente na aba Prompt.");
+          const importErr = await importRes.json().catch(() => ({})) as { error?: string };
+          throw new Error(
+            importErr.error ?? "Cliente criado, mas falha ao importar o prompt. Tente importar manualmente na aba Prompt."
+          );
         }
       } else {
-        // Gera o primeiro prompt automaticamente — sem etapa extra para o usuário
+        // Gera o primeiro prompt automaticamente
         const genRes = await fetch(`/api/clients/${client.id}/generate-prompt`, { method: "POST" });
         if (!genRes.ok) {
-          const genErr = await genRes.json().catch(() => ({}));
-          throw new Error(genErr.error ?? "Cliente criado, mas falha ao gerar o prompt. Tente gerar manualmente na aba Prompt.");
+          const genErr = await genRes.json().catch(() => ({})) as { error?: string };
+          throw new Error(
+            genErr.error ?? "Cliente criado, mas falha ao gerar o prompt. Tente gerar manualmente na aba Prompt."
+          );
         }
       }
 
@@ -225,17 +287,72 @@ export default function NewClientPage() {
     }
   }
 
+  // ─── Render ────────────────────────────────────────────────────────────────
+
   return (
     <div className="max-w-3xl animate-fade-up">
       <h1 className="text-2xl font-semibold text-[var(--text-primary)] mb-1">Novo cliente</h1>
       <p className="text-[var(--text-muted)] text-sm mb-8">
-        Preencha os dados da clínica ou faça upload do CSV de onboarding para pré-preencher o formulário.
+        Preencha os dados manualmente, importe de um CSV de onboarding, ou cole o prompt existente para migrar um cliente já ativo.
       </p>
 
-      {/* Upload CSV */}
+      {/* ── Ponto de partida: Prompt existente ─────────────────────────────── */}
+      <div className="bg-[var(--surface)] border border-[var(--surface-border)] rounded-lg p-5 mb-4">
+        <div className="flex items-start gap-3 mb-3">
+          <FileText className="w-4 h-4 text-[var(--accent)] mt-0.5 shrink-0" />
+          <div>
+            <p className="text-sm font-medium text-[var(--text-secondary)]">
+              Migrar cliente existente — cole o prompt atual
+            </p>
+            <p className="text-xs text-[var(--text-muted)] mt-0.5">
+              O sistema extrai os dados da clínica e preenche o formulário automaticamente.
+              O prompt será importado diretamente (sem re-geração).
+            </p>
+          </div>
+        </div>
+
+        <textarea
+          value={existingPromptText}
+          onChange={(e) => {
+            setExistingPromptText(e.target.value);
+            if (!e.target.value.trim()) setExtractedCount(0);
+          }}
+          rows={8}
+          placeholder="Cole aqui o prompt existente da clínica..."
+          className={input()}
+        />
+
+        <div className="flex items-center justify-between mt-3 gap-3 flex-wrap">
+          <div className="flex items-center gap-3">
+            {existingPromptText.trim().length > 0 && (
+              <span className="text-xs text-[var(--text-disabled)]">
+                {existingPromptText.trim().length} caracteres
+              </span>
+            )}
+            {extractedCount > 0 && (
+              <span className="text-xs text-emerald-400 flex items-center gap-1">
+                <CheckCircle2 className="w-3 h-3" />
+                {extractedCount} campos preenchidos automaticamente
+              </span>
+            )}
+          </div>
+
+          <button
+            type="button"
+            onClick={handleExtractFromPrompt}
+            disabled={existingPromptText.trim().length < 50 || extracting}
+            className="flex items-center gap-2 bg-[var(--surface-raised)] hover:bg-[var(--surface-hover)] disabled:opacity-40 disabled:cursor-not-allowed border border-[var(--surface-border)] text-[var(--text-secondary)] text-xs font-medium px-3 py-1.5 rounded transition-colors"
+          >
+            <Sparkles className="w-3 h-3" />
+            {extracting ? "Extraindo dados..." : "Extrair dados do prompt →"}
+          </button>
+        </div>
+      </div>
+
+      {/* ── Ponto de partida: CSV ────────────────────────────────────────────── */}
       <div className="bg-[var(--surface)] border border-[var(--surface-border)] rounded-lg p-5 mb-8">
         <p className="text-sm font-medium text-[var(--text-secondary)] mb-3">
-          Importar formulário de onboarding (opcional)
+          Ou importe o formulário de onboarding (CSV/XLSX)
         </p>
         <label className="flex items-center gap-3 cursor-pointer group">
           <span className="bg-[var(--surface-raised)] hover:bg-[var(--surface-hover)] border border-[var(--surface-border)] text-[var(--text-secondary)] text-xs px-3 py-1.5 rounded transition-colors">
@@ -249,7 +366,8 @@ export default function NewClientPage() {
             disabled={uploading}
           />
           {csvPreview && (
-            <span className="text-xs text-emerald-400">
+            <span className="text-xs text-emerald-400 flex items-center gap-1">
+              <CheckCircle2 className="w-3 h-3" />
               Arquivo importado — formulário pré-preenchido
             </span>
           )}
@@ -272,7 +390,18 @@ export default function NewClientPage() {
         )}
       </div>
 
-      {/* Formulário */}
+      {/* ── Banner: modo de importação ativo ─────────────────────────────────── */}
+      {hasExistingPrompt && (
+        <div className="flex items-start gap-2 bg-[var(--accent)]/10 border border-[var(--accent)]/30 text-[var(--accent)] text-xs px-4 py-3 rounded-lg mb-8">
+          <Upload className="w-3.5 h-3.5 mt-0.5 shrink-0" />
+          <span>
+            Modo de importação ativo — ao salvar, o prompt colado será importado diretamente (sem geração automática).
+            Para voltar ao modo padrão, limpe o campo de prompt acima.
+          </span>
+        </div>
+      )}
+
+      {/* ── Formulário ───────────────────────────────────────────────────────── */}
       <form onSubmit={handleSubmit(onSubmit)} className="space-y-8">
 
         {/* Seção: Dados básicos */}
@@ -534,44 +663,6 @@ export default function NewClientPage() {
           </div>
         </Section>
 
-        {/* Prompt existente */}
-        <div className="bg-[var(--surface)] border border-[var(--surface-border)] rounded-lg p-5">
-          <label className="flex items-center gap-3 cursor-pointer select-none">
-            <input
-              type="checkbox"
-              checked={hasExistingPrompt}
-              onChange={(e) => setHasExistingPrompt(e.target.checked)}
-              className="rounded border-[var(--border)] text-[var(--accent)] focus:ring-[var(--accent)]"
-            />
-            <span className="text-sm font-medium text-[var(--text-secondary)] flex items-center gap-2">
-              <Upload className="w-4 h-4 text-[var(--text-muted)]" />
-              Já tenho um prompt pronto para este cliente
-            </span>
-          </label>
-
-          {hasExistingPrompt && (
-            <div className="mt-4 space-y-2">
-              <p className="text-xs text-[var(--text-muted)]">
-                Cole o prompt completo abaixo. O sistema irá estruturá-lo nos módulos corretos automaticamente.
-                Se o prompt já usar marcadores <code className="bg-[var(--surface-raised)] px-1 rounded text-[var(--text-secondary)]">###MÓDULO:CHAVE###</code>, a estrutura será preservada.
-              </p>
-              <textarea
-                value={existingPromptText}
-                onChange={(e) => setExistingPromptText(e.target.value)}
-                rows={12}
-                placeholder="Cole aqui o prompt existente da clínica..."
-                className={input()}
-              />
-              {existingPromptText.trim().length > 0 && (
-                <p className="text-xs text-emerald-400 flex items-center gap-1">
-                  <Sparkles className="w-3 h-3" />
-                  {existingPromptText.trim().length} caracteres · pronto para importar
-                </p>
-              )}
-            </div>
-          )}
-        </div>
-
         {/* Erro */}
         {error && (
           <div className="bg-red-500/10 border border-red-500/30 text-red-400 text-sm px-4 py-3 rounded-lg">
@@ -603,7 +694,8 @@ export default function NewClientPage() {
   );
 }
 
-// Helpers de UI
+// ─── UI helpers ──────────────────────────────────────────────────────────────
+
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
   return (
     <div>

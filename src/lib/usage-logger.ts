@@ -30,7 +30,8 @@ export type OperationType =
   | "pipeline_fix"
   | "interaction_score"
   | "knowledge_distill"
-  | "transcript_anonymize";
+  | "transcript_anonymize"
+  | "parse_prompt_to_client";
 
 export interface UsageData {
   input_tokens: number;
