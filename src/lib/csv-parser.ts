@@ -104,6 +104,9 @@ function detectField(key: string): MappableField | null {
   // Tom / informalidade
   if (key.includes("informalidade") || key.includes("nivel_de_informal") || key.includes("tom_desejado") || key === "tom" || key === "tone") return "tone";
 
+  // Condução comercial / SPIN
+  if (key.includes("spin") || key.includes("conducao") || key.includes("consultiv") || key.includes("venda") || key.includes("abordagem")) return "salesApproach";
+
   // Uso de emojis
   if (key.includes("emoji") || key.includes("uso_de_emoji")) return "emojiUsage";
 
@@ -175,6 +178,15 @@ function normalizeTone(existing: string | undefined, newValue: string): string {
   return tone;
 }
 
+function normalizeSalesApproach(value: string): string {
+  const v = value.toLowerCase();
+  if (v.includes("adapt")) return "ADAPTIVE";
+  if (v.includes("spin") || v.includes("consultiv") || v.includes("dor") || v.includes("investig")) return "CONSULTATIVE_SPIN";
+  if (v.includes("equilibr") || v.includes("moderad")) return "BALANCED";
+  if (v.includes("diret") || v.includes("objetiv") || v.includes("rapido") || v.includes("rápido")) return "DIRECT";
+  return value;
+}
+
 // Normaliza o valor do campo "schedulingSystem" para o enum
 function normalizeSchedulingSystem(value: string): string {
   const v = value.toLowerCase();
@@ -214,6 +226,10 @@ function mapRow(row: Record<string, string>): ParsedOnboardingData {
     // Campos especiais com normalização de enum
     if (field === "tone") {
       result.tone = normalizeTone(result.tone, trimmedValue);
+      continue;
+    }
+    if (field === "salesApproach") {
+      result.salesApproach = normalizeSalesApproach(trimmedValue);
       continue;
     }
     if (field === "schedulingSystem") {

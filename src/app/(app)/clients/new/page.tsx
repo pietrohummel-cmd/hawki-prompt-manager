@@ -28,6 +28,7 @@ const schema = z.object({
   schedulingSystem: z.enum(["CLINICORP", "CONTROLE_ODONTO", "SIMPLES_DENTAL", "GOOGLE_AGENDA", ""]).optional(),
   schedulingMode: z.enum(["DIRECT", "HANDOFF", "LINK", ""]).optional(),
   tone: z.enum(["FORMAL", "INFORMAL_MODERATE", "CASUAL", ""]).optional(),
+  salesApproach: z.enum(["DIRECT", "BALANCED", "CONSULTATIVE_SPIN", "ADAPTIVE", ""]).optional(),
   targetAudience: z.string().optional(),
   ageRange: z.string().optional(),
   restrictions: z.string().optional(),
@@ -70,7 +71,15 @@ const SCHEDULING_SYSTEM_LABELS: Record<string, string> = {
   GOOGLE_AGENDA: "Google Agenda",
 };
 
+const SALES_APPROACH_LABELS: Record<string, string> = {
+  ADAPTIVE: "Adaptativo — espelha o ritmo do paciente",
+  BALANCED: "Equilibrado — 1 pergunta de contexto antes de agendar",
+  CONSULTATIVE_SPIN: "Consultivo/SPIN — entende dor, impacto e motivação",
+  DIRECT: "Direto — responde e conduz rapidamente ao agendamento",
+};
+
 const VALID_TONES = ["FORMAL", "INFORMAL_MODERATE", "CASUAL"] as const;
+const VALID_SALES_APPROACHES = ["DIRECT", "BALANCED", "CONSULTATIVE_SPIN", "ADAPTIVE"] as const;
 const VALID_MODES = ["DIRECT", "HANDOFF", "LINK"] as const;
 const VALID_SYSTEMS = ["CLINICORP", "CONTROLE_ODONTO", "SIMPLES_DENTAL", "GOOGLE_AGENDA"] as const;
 
@@ -87,6 +96,10 @@ function mapParsedToForm(parsed: ParsedOnboardingData): Partial<FormData> {
 
   const schedulingSystem = VALID_SYSTEMS.includes(parsed.schedulingSystem as typeof VALID_SYSTEMS[number])
     ? (parsed.schedulingSystem as FormData["schedulingSystem"])
+    : undefined;
+
+  const salesApproach = VALID_SALES_APPROACHES.includes(parsed.salesApproach as typeof VALID_SALES_APPROACHES[number])
+    ? (parsed.salesApproach as FormData["salesApproach"])
     : undefined;
 
   return {
@@ -121,6 +134,7 @@ function mapParsedToForm(parsed: ParsedOnboardingData): Partial<FormData> {
     urgencyHandling: parsed.urgencyHandling,
     urgencyProcedure: parsed.urgencyProcedure,
     tone,
+    salesApproach,
     schedulingMode,
     schedulingSystem,
   };
@@ -154,7 +168,7 @@ export default function NewClientPage() {
   const EXTRACTION_FIELDS = [
     "clinicName", "assistantName", "name", "phone", "email",
     "city", "state", "zipCode", "neighborhood", "address", "reference",
-    "instagram", "website", "tone", "attendantName", "schedulingMode", "schedulingSystem",
+    "instagram", "website", "tone", "salesApproach", "attendantName", "schedulingMode", "schedulingSystem",
     "businessHours", "specialists", "certifications", "technologies", "differentials",
     "paymentInfo", "targetAudience", "ageRange", "emojiUsage", "treatmentPronoun",
     "restrictions", "mandatoryPhrases", "consultationInfo", "schedulingRequirements",
@@ -168,7 +182,7 @@ export default function NewClientPage() {
     formState: { errors },
   } = useForm<FormData>({
     resolver: zodResolver(schema),
-    defaultValues: { assistantName: "Sofia" },
+    defaultValues: { assistantName: "Sofia", salesApproach: "ADAPTIVE" },
   });
 
   // ─── Handlers ──────────────────────────────────────────────────────────────
@@ -478,6 +492,13 @@ export default function NewClientPage() {
               <select {...register("tone")} className={input()}>
                 <option value="">Selecione...</option>
                 {Object.entries(TONE_LABELS).map(([v, l]) => (
+                  <option key={v} value={v}>{l}</option>
+                ))}
+              </select>
+            </Field>
+            <Field label="Condução do atendimento">
+              <select {...register("salesApproach")} className={input()}>
+                {Object.entries(SALES_APPROACH_LABELS).map(([v, l]) => (
                   <option key={v} value={v}>{l}</option>
                 ))}
               </select>

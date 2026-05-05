@@ -73,13 +73,18 @@ Responda SOMENTE em JSON válido:
 }
 
 export async function POST(
-  _req: Request,
+  req: Request,
   { params }: { params: Promise<{ id: string; ticketId: string }> }
 ) {
   const { userId } = await auth();
   if (!userId) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
   const { id: clientId, ticketId } = await params;
+  const body = await req.json().catch(() => ({}));
+  const regenerationFeedback =
+    typeof body.regenerationFeedback === "string" && body.regenerationFeedback.trim()
+      ? body.regenerationFeedback.trim()
+      : null;
 
   const ticket = await prisma.correctionTicket.findFirst({
     where: { id: ticketId, clientId },
@@ -144,7 +149,8 @@ export async function POST(
     affectedModule,
     currentContent,
     ticket.description,
-    ticket.conversationTranscript
+    ticket.conversationTranscript,
+    regenerationFeedback
   );
 
   // Step 3: persist — conditional on ticket still being in a processable state

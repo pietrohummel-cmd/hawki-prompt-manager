@@ -5,6 +5,7 @@ import { prisma } from "@/lib/prisma";
 
 const patchSchema = z.object({
   minConversationsPerVersion: z.number().int().min(1).max(100).optional(),
+  salesApproach: z.enum(["DIRECT", "BALANCED", "CONSULTATIVE_SPIN", "ADAPTIVE"]).optional(),
 });
 
 export async function GET(

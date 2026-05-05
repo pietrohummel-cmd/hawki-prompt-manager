@@ -10,6 +10,7 @@
  */
 
 import Anthropic from "@anthropic-ai/sdk";
+import OpenAI from "openai";
 import { Prisma } from "@/generated/prisma";
 import type { Client, ModuleKey } from "@/generated/prisma";
 import { prisma } from "@/lib/prisma";
@@ -17,9 +18,17 @@ import { MODULE_ORDER, MODULE_LABELS } from "@/lib/prompt-constants";
 import { SOFIA_GUIDELINES_CONDENSED } from "@/lib/sofia-guidelines";
 import { logUsage } from "@/lib/usage-logger";
 import { evaluateRegressionCase } from "@/lib/regression-runner";
+import { auditAndRefinePromptCorrection } from "@/lib/module-editor";
 
 function getAnthropic() {
   return new Anthropic({ apiKey: process.env.HAWKI_ANTHROPIC_API_KEY });
+}
+
+function getOpenAI() {
+  if (!process.env.OPENAI_API_KEY) {
+    throw new Error("OPENAI_API_KEY não configurada. Adicione ao .env.local e reinicie o servidor.");
+  }
+  return new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 }
 
 interface Issue {
@@ -108,18 +117,47 @@ ${currentContent}
 PROBLEMA IDENTIFICADO:
 ${issueDescription}
 
-Reescreva este módulo corrigindo o problema identificado sem perder nenhuma informação válida.
+PADRÃO HAWKI PARA CORREÇÃO:
+- Faça mudança mínima: corrija o problema identificado sem perder nenhuma informação válida.
+- Regra forte tem gatilho, ação e forma. Evite regra vaga que apenas proíbe.
+- Se o problema for tom/tamanho de mensagem, prefira comportamento verificável: até 2 frases curtas, uma pergunta por turno, dividir explicações longas. Não dependa de limite de caracteres.
+- Se o problema envolver repetição de saudação/apresentação, corrija o estado conversacional: saudação e apresentação só na primeira mensagem da Sofia.
+- Se o problema envolver falta de condução para agendamento, preserve o modo do cliente: direto, equilibrado, consultivo/SPIN ou adaptativo; use 1 pergunta por mensagem e conecte dor/objetivo ao agendamento sem pressão.
+- Se o problema envolver envio de vídeo, link, imagem ou documento, instrua a parar após a mídia e aguardar o paciente voltar; não misture mídia com pergunta de origem/qualificação no mesmo turno.
+- Se o problema envolver campanha, ação sazonal, condição temporária, preço, condição comercial, pagamento ou parcelamento, obrigue consulta à KB/search_knowledge quando disponível e proíba inferir parcelamento, facilidade, promoção, desconto ou benefício.
+- Para clínicas premium/boutique, preserve o termo "campanha" ou "condição especial"; não use "promoção" se a KB não usar esse termo.
+- Não invente preço, endereço, horário, profissional, ferramenta ou política.
+
+Reescreva este módulo corrigindo o problema identificado.
 Responda APENAS com o conteúdo corrigido do módulo — sem comentários, sem cabeçalho, sem ###MÓDULO###.`;
 
-  const message = await getAnthropic().messages.create({
-    model: "claude-haiku-4-5-20251001",
+  const completion = await getOpenAI().chat.completions.create({
+    model: "gpt-4o",
     max_tokens: 2048,
+    temperature: 0.2,
     messages: [{ role: "user", content: prompt }],
   });
 
-  await logUsage({ clientId: client.id, operation: "pipeline_fix", model: "claude-haiku-4-5-20251001", usage: message.usage });
+  await logUsage({
+    clientId: client.id,
+    operation: "pipeline_fix",
+    model: "gpt-4o",
+    usage: {
+      input_tokens: completion.usage?.prompt_tokens ?? 0,
+      output_tokens: completion.usage?.completion_tokens ?? 0,
+    },
+  });
 
-  return message.content[0].type === "text" ? message.content[0].text.trim() : currentContent;
+  const proposedContent = completion.choices[0]?.message.content?.trim() ?? currentContent;
+  if (!proposedContent || proposedContent === currentContent) return proposedContent;
+
+  return auditAndRefinePromptCorrection({
+    clientId: client.id,
+    moduleKey,
+    currentContent,
+    problemDescription: issueDescription,
+    proposedContent,
+  });
 }
 
 export async function runCorrectionPipeline(

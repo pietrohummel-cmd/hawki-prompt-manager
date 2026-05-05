@@ -7,6 +7,7 @@
 ## Contexto
 
 O `hawki-prompt-manager` gera prompts estruturados em 10 módulos para a assistente Sofia.
+Decisão operacional atual: geração, importação/reorganização e correções textuais de prompt devem usar OpenAI, porque a Sofia processa esses prompts em OpenAI em produção. Modelos Claude/Anthropic podem continuar em tarefas auxiliares de leitura, extração, classificação, anonimização, scoring e destilação, desde que não sejam o gerador final do prompt.
 Três problemas foram identificados após comparação com a documentação oficial Hawki:
 
 | # | Problema | Impacto | Arquivo afetado |
@@ -28,6 +29,25 @@ Toda mudança segue o ciclo:
 4. Executar regressão e comparar
 5. Simular conversas críticas
 6. Aprovar ou reverter
+
+## Correção operacional aplicada em tickets (2026-05-05)
+
+Escopo: fluxo manual de tickets/correções, sem implementar `TOOLS`, migrations ou slices do ecossistema.
+
+- `module-editor.ts`: sugestões de módulo/ticket migradas para `gpt-4o`.
+- `correction-pipeline.ts`: aplicação textual de correção migrada para `gpt-4o`.
+- Auditoria independente: Anthropic avalia a correção OpenAI; se falhar, a crítica é enviada para OpenAI gerar a versão final. Anthropic não escreve o módulo aplicado.
+- Tickets: operador pode editar problema/contexto e passar feedback de regeneração com o output esperado antes de gerar nova sugestão.
+- Prompt interno de correção: exige mudança mínima e regra forte no padrão Hawki (`gatilho + ação + forma`), evitando regras vagas e limites frágeis de caracteres quando o objetivo é comportamento conversacional.
+
+Validação feita no código:
+
+```bash
+npx tsc --noEmit
+npx eslint 'src/lib/module-editor.ts' 'src/lib/correction-pipeline.ts' 'src/app/api/clients/[id]/tickets/[ticketId]/route.ts' 'src/app/api/clients/[id]/tickets/[ticketId]/process/route.ts' 'src/app/api/clients/[id]/tickets/[ticketId]/suggest/route.ts' 'src/app/(app)/clients/[id]/tickets/page.tsx'
+```
+
+Validação funcional ainda recomendada: criar ou usar 2-3 tickets reais, gerar sugestão, rejeitar com feedback explícito de output esperado, regerar e rodar Simulação/Regressão antes de aplicar em produção.
 
 ---
 

@@ -33,6 +33,13 @@ enum ClientTone {
   CASUAL
 }
 
+enum ClientSalesApproach {
+  DIRECT
+  BALANCED
+  CONSULTATIVE_SPIN
+  ADAPTIVE
+}
+
 enum ClientStatus {
   ONBOARDING
   ACTIVE
@@ -148,6 +155,7 @@ model Client {
   schedulingSystem  SchedulingSystem?
   schedulingMode    SchedulingMode?
   tone              ClientTone?
+  salesApproach     ClientSalesApproach @default(ADAPTIVE)
   targetAudience    String?          // texto livre: público-alvo
   ageRange          String?          // ex: "40+", "18-35"
   restrictions          String?          // o que Sofia nunca pode fazer/dizer

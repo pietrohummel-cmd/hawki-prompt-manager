@@ -27,6 +27,7 @@ function getAnthropic() {
 }
 
 const VALID_TONES       = ["FORMAL", "INFORMAL_MODERATE", "CASUAL"] as const;
+const VALID_SALES_APPROACHES = ["DIRECT", "BALANCED", "CONSULTATIVE_SPIN", "ADAPTIVE"] as const;
 const VALID_MODES       = ["DIRECT", "HANDOFF", "LINK"] as const;
 const VALID_SYSTEMS     = ["CLINICORP", "CONTROLE_ODONTO", "SIMPLES_DENTAL", "GOOGLE_AGENDA"] as const;
 const VALID_CATEGORIES  = [
@@ -83,6 +84,7 @@ Retorne APENAS um objeto JSON (sem markdown) com estes campos. Use null para cam
   "instagram": string | null,
   "website": string | null,
   "tone": "FORMAL" | "INFORMAL_MODERATE" | "CASUAL" | null,
+  "salesApproach": "DIRECT" | "BALANCED" | "CONSULTATIVE_SPIN" | "ADAPTIVE" | null,
   "attendantName": string | null,
   "schedulingMode": "DIRECT" | "HANDOFF" | "LINK" | null,
   "schedulingSystem": "CLINICORP" | "CONTROLE_ODONTO" | "SIMPLES_DENTAL" | "GOOGLE_AGENDA" | null,
@@ -109,6 +111,7 @@ Retorne APENAS um objeto JSON (sem markdown) com estes campos. Use null para cam
 
 Regras de mapeamento:
 - tone: FORMAL="Olá/Como posso ajudar/linguagem formal", INFORMAL_MODERATE="Oi/Tudo bem/informal moderado", CASUAL="E aí/Opa/gírias"
+- salesApproach: DIRECT=atendimento direto ao agendamento, BALANCED=1 pergunta de contexto antes de agendar, CONSULTATIVE_SPIN=condução consultiva/SPIN, ADAPTIVE=espelha o ritmo do paciente entre direto e SPIN
 - schedulingMode: DIRECT=IA agenda no sistema diretamente, HANDOFF=IA passa para humano finalizar, LINK=IA envia link de agendamento
 - schedulingSystem: apenas se mencionado explicitamente (Clinicorp, Controle Odonto, Simples Dental, Google Agenda)
 - serviceCategories: array com as categorias identificadas — use apenas: IMPLANTES, ORTODONTIA, ESTETICA, CLINICO_GERAL, PERIODONTIA, ENDODONTIA, PEDIATRIA, PROTESE, CIRURGIA, OUTROS
@@ -169,6 +172,11 @@ ${rawText}
     const tone = extracted.tone as string;
     if (VALID_TONES.includes(tone as typeof VALID_TONES[number])) {
       fields.tone = tone;
+    }
+
+    const salesApproach = extracted.salesApproach as string;
+    if (VALID_SALES_APPROACHES.includes(salesApproach as typeof VALID_SALES_APPROACHES[number])) {
+      fields.salesApproach = salesApproach;
     }
 
     const schedulingMode = extracted.schedulingMode as string;

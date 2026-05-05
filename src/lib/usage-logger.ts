@@ -13,7 +13,7 @@ const PRICING: Record<string, { inputPerToken: number; outputPerToken: number }>
     outputPerToken: 4.0 / 1_000_000,  // $4.00 por milhão de tokens de saída
   },
   // ── OpenAI ─────────────────────────────────────────────────────────────────
-  // Usado em generate_prompt e import_restructure (Sofia roda em GPT-4o)
+  // Usado em geração, importação e correções de prompt (Sofia processa prompts em OpenAI)
   "gpt-4o": {
     inputPerToken: 2.50 / 1_000_000,  // $2.50 por milhão de tokens de entrada
     outputPerToken: 10.0 / 1_000_000, // $10.00 por milhão de tokens de saída
@@ -40,6 +40,7 @@ export type OperationType =
   | "generate_kb"
   | "pipeline_analyze"
   | "pipeline_fix"
+  | "audit_prompt_correction"
   | "interaction_score"
   | "knowledge_distill"
   | "distill_client_insights"
@@ -58,7 +59,7 @@ export function calculateCost(model: string, usage: UsageData): number {
 }
 
 /**
- * Registra o uso de tokens de uma chamada à API da Anthropic.
+ * Registra o uso de tokens de chamadas de IA.
  * Chamado de forma assíncrona — não bloqueia o fluxo principal em caso de falha.
  */
 export async function logUsage(params: {

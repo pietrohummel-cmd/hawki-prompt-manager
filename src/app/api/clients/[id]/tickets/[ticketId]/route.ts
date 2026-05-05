@@ -8,6 +8,8 @@ import { MODULE_ORDER } from "@/lib/prompt-constants";
 const MODULE_KEY_VALUES = MODULE_ORDER as [ModuleKey, ...ModuleKey[]];
 
 const patchSchema = z.object({
+  description: z.string().min(1).optional(),
+  conversationTranscript: z.string().nullable().optional(),
   status: z.enum(["OPEN", "SUGGESTED", "APPROVED", "APPLIED", "REJECTED"]).optional(),
   finalCorrection: z.string().optional(),
   aiSuggestion: z.string().optional(),

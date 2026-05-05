@@ -25,7 +25,7 @@ const PRIORITY_COLORS: Record<TicketPriority, string> = {
 };
 
 const STATUS_LABELS: Record<TicketStatus, string> = {
-  OPEN:       "Analisando...",
+  OPEN:       "Pendente",
   SUGGESTED:  "Correção gerada",
   APPROVED:   "Aprovado",
   APPLIED:    "Aplicado",
@@ -46,7 +46,7 @@ type StatusFilter = TicketStatus | "ALL";
 
 const FILTER_TABS: { value: StatusFilter; label: string }[] = [
   { value: "ALL",       label: "Todos" },
-  { value: "OPEN",      label: "Analisando" },
+  { value: "OPEN",      label: "Pendentes" },
   { value: "SUGGESTED", label: "Aguardando revisão" },
   { value: "APPLIED",   label: "Aplicados" },
   { value: "REJECTED",  label: "Rejeitados" },
@@ -72,6 +72,26 @@ function formatDate(dateStr: string) {
     day: "2-digit", month: "2-digit", year: "numeric",
     hour: "2-digit", minute: "2-digit",
   });
+}
+
+async function readApiResponse(res: Response): Promise<Record<string, unknown>> {
+  const text = await res.text();
+  if (!text) return {};
+
+  try {
+    return JSON.parse(text) as Record<string, unknown>;
+  } catch {
+    const fallback =
+      text.trim().startsWith("<")
+        ? `A API retornou uma página HTML em vez de JSON (HTTP ${res.status}). Tente novamente; se persistir, recarregue o servidor local.`
+        : text.slice(0, 240);
+
+    return { error: fallback };
+  }
+}
+
+function getApiError(data: Record<string, unknown>, fallback: string) {
+  return typeof data.error === "string" ? data.error : fallback;
 }
 
 /* ── Componente principal ───────────────────────────────── */
@@ -100,6 +120,10 @@ export default function TicketsPage() {
   const [editingSuggestion, setEditingSuggestion] = useState<Record<string, string>>({});
   const [editingModule, setEditingModule] = useState<Record<string, ModuleKey | "">>({});
   const [savingModule, setSavingModule]   = useState<string | null>(null);
+  const [editingDescription, setEditingDescription] = useState<Record<string, string>>({});
+  const [editingTranscript, setEditingTranscript] = useState<Record<string, string>>({});
+  const [savingContext, setSavingContext] = useState<string | null>(null);
+  const [regenerationFeedback, setRegenerationFeedback] = useState<Record<string, string>>({});
 
   const load = useCallback(async () => {
     try {
@@ -132,26 +156,77 @@ export default function TicketsPage() {
   const [processError, setProcessError] = useState<Record<string, string>>({});
 
   // Auto-pipeline: identify module + generate suggestion
-  async function handleProcess(ticketId: string) {
+  async function handleProcess(ticketId: string, feedback?: string) {
     setProcessing(ticketId);
     setProcessError((prev) => { const n = { ...prev }; delete n[ticketId]; return n; });
     try {
-      const res = await fetch(`/api/clients/${id}/tickets/${ticketId}/process`, { method: "POST" });
-      const data = await res.json();
+      const res = await fetch(`/api/clients/${id}/tickets/${ticketId}/process`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ regenerationFeedback: feedback?.trim() || undefined }),
+      });
+      const data = await readApiResponse(res);
       if (res.status === 422) {
         // Módulo não identificado — manter OPEN, mostrar aviso inline para seleção manual
-        setProcessError((prev) => ({ ...prev, [ticketId]: data.error ?? "Módulo não identificado" }));
+        setProcessError((prev) => ({ ...prev, [ticketId]: getApiError(data, "Módulo não identificado") }));
         return;
       }
-      if (!res.ok) throw new Error(data.error ?? "Erro ao processar ticket");
-      setTickets((prev) => prev.map((t) => t.id === ticketId ? data : t));
-      setEditingSuggestion((prev) => ({ ...prev, [ticketId]: data.aiSuggestion ?? "" }));
+      if (!res.ok) {
+        const message = getApiError(data, "Erro ao processar ticket");
+        setProcessError((prev) => ({ ...prev, [ticketId]: message }));
+        throw new Error(message);
+      }
+      const updatedTicket = data as unknown as TicketItem;
+      setTickets((prev) => prev.map((t) => t.id === ticketId ? updatedTicket : t));
+      setEditingSuggestion((prev) => ({ ...prev, [ticketId]: updatedTicket.aiSuggestion ?? "" }));
+      setRegenerationFeedback((prev) => ({ ...prev, [ticketId]: "" }));
       setExpandedTicket(ticketId);
     } catch (err) {
-      showToast({ type: "error", message: err instanceof Error ? err.message : "Erro ao processar" });
+      const message = err instanceof Error ? err.message : "Erro ao processar";
+      setProcessError((prev) => ({ ...prev, [ticketId]: message }));
+      showToast({ type: "error", message });
     } finally {
       setProcessing(null);
     }
+  }
+
+  async function handleSaveContext(ticket: TicketItem): Promise<TicketItem | null> {
+    const description = editingDescription[ticket.id] ?? ticket.description;
+    const conversationTranscript = editingTranscript[ticket.id] ?? ticket.conversationTranscript ?? "";
+    if (!description.trim()) {
+      showToast({ type: "error", message: "A descrição do problema não pode ficar vazia." });
+      return null;
+    }
+
+    setSavingContext(ticket.id);
+    try {
+      const res = await fetch(`/api/clients/${id}/tickets/${ticket.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          description: description.trim(),
+          conversationTranscript: conversationTranscript.trim() || null,
+        }),
+      });
+      const data = await readApiResponse(res);
+      if (!res.ok) throw new Error(getApiError(data, "Erro ao salvar contexto"));
+      const updated = data as unknown as TicketItem;
+      setTickets((prev) => prev.map((t) => (t.id === ticket.id ? updated : t)));
+      setEditingDescription((prev) => { const n = { ...prev }; delete n[ticket.id]; return n; });
+      setEditingTranscript((prev) => { const n = { ...prev }; delete n[ticket.id]; return n; });
+      return updated;
+    } catch (err) {
+      showToast({ type: "error", message: err instanceof Error ? err.message : "Erro ao salvar contexto" });
+      return null;
+    } finally {
+      setSavingContext(null);
+    }
+  }
+
+  async function handleRegenerate(ticket: TicketItem) {
+    const saved = await handleSaveContext(ticket);
+    if (!saved) return;
+    await handleProcess(saved.id, regenerationFeedback[ticket.id]);
   }
 
   async function handleCreate() {
@@ -168,14 +243,15 @@ export default function TicketsPage() {
           priority: formPriority,
         }),
       });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error ?? "Erro ao criar ticket");
+      const data = await readApiResponse(res);
+      if (!res.ok) throw new Error(getApiError(data, "Erro ao criar ticket"));
+      const createdTicket = data as unknown as TicketItem;
       closeForm();
       // Add ticket to list immediately, then auto-process it
-      setTickets((prev) => [data, ...prev]);
-      setExpandedTicket(data.id);
+      setTickets((prev) => [createdTicket, ...prev]);
+      setExpandedTicket(createdTicket.id);
       // Trigger auto-pipeline in background (no await here — UI updates reactively)
-      handleProcess(data.id);
+      handleProcess(createdTicket.id);
     } catch (err) {
       setCreateError(err instanceof Error ? err.message : "Erro ao criar");
     } finally {
@@ -193,8 +269,8 @@ export default function TicketsPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ finalCorrection: content }),
       });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error ?? "Erro ao aplicar");
+      const data = await readApiResponse(res);
+      if (!res.ok) throw new Error(getApiError(data, "Erro ao aplicar"));
       await load();
       setExpandedTicket(null);
       showToast({
@@ -236,8 +312,9 @@ export default function TicketsPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ affectedModule: newModule || null }),
       });
-      if (!res.ok) throw new Error("Erro ao atualizar módulo");
-      const updated = await res.json();
+      const data = await readApiResponse(res);
+      if (!res.ok) throw new Error(getApiError(data, "Erro ao atualizar módulo"));
+      const updated = data as unknown as TicketItem;
       setTickets((prev) => prev.map((t) => (t.id === ticketId ? updated : t)));
       setEditingModule((prev) => { const n = { ...prev }; delete n[ticketId]; return n; });
       showToast({ type: "success", message: "Módulo atualizado." });
@@ -354,6 +431,11 @@ export default function TicketsPage() {
               : (ticket.affectedModule ?? "");
             const canApply = (ticket.status === "SUGGESTED" || ticket.status === "APPROVED") && suggestionContent;
             const isDone = ticket.status === "APPLIED" || ticket.status === "REJECTED";
+            const descriptionDraft = editingDescription[ticket.id] ?? ticket.description;
+            const transcriptDraft = editingTranscript[ticket.id] ?? ticket.conversationTranscript ?? "";
+            const contextChanged =
+              descriptionDraft !== ticket.description ||
+              transcriptDraft !== (ticket.conversationTranscript ?? "");
 
             return (
               <div
@@ -404,6 +486,53 @@ export default function TicketsPage() {
                 {/* Detalhes expandidos */}
                 {expanded && (
                   <div className="border-t border-[var(--surface-border)] px-4 py-4 space-y-4">
+                    <div className="grid gap-3">
+                      <div>
+                        <label className="text-[11px] font-medium text-[var(--text-muted)] uppercase tracking-[0.1em] mb-1.5 block">
+                          Problema reportado
+                        </label>
+                        <textarea
+                          value={descriptionDraft}
+                          onChange={(e) =>
+                            setEditingDescription((prev) => ({ ...prev, [ticket.id]: e.target.value }))
+                          }
+                          rows={3}
+                          disabled={isDone || isProcessing}
+                          className="w-full bg-[var(--surface-raised)] border border-[var(--surface-border)] text-[var(--text-primary)] text-[13px] rounded-md px-3 py-2.5 resize-none focus:outline-none focus:border-[var(--accent)] transition-colors leading-relaxed disabled:opacity-60"
+                        />
+                      </div>
+
+                      <div>
+                        <label className="text-[11px] font-medium text-[var(--text-muted)] uppercase tracking-[0.1em] mb-1.5 block">
+                          Conversa ou contexto
+                        </label>
+                        <textarea
+                          value={transcriptDraft}
+                          onChange={(e) =>
+                            setEditingTranscript((prev) => ({ ...prev, [ticket.id]: e.target.value }))
+                          }
+                          rows={4}
+                          disabled={isDone || isProcessing}
+                          placeholder="Cole aqui a conversa, o trecho problemático ou mais contexto para a IA..."
+                          className="w-full bg-[var(--surface-raised)] border border-[var(--surface-border)] text-[var(--text-primary)] text-[12px] rounded-md px-3 py-2.5 resize-none focus:outline-none focus:border-[var(--accent)] placeholder:text-[var(--text-disabled)] transition-colors leading-relaxed disabled:opacity-60"
+                        />
+                      </div>
+
+                      {!isDone && contextChanged && (
+                        <div className="flex justify-end">
+                          <button
+                            onClick={() => handleSaveContext(ticket)}
+                            disabled={savingContext === ticket.id || isProcessing}
+                            className="press flex items-center gap-1.5 text-[12px] font-medium px-3 py-2 rounded-md bg-[var(--accent)] hover:bg-[var(--accent-hover)] text-white transition-colors disabled:opacity-50"
+                          >
+                            {savingContext === ticket.id
+                              ? <span className="w-3 h-3 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                              : <Check size={12} />}
+                            Salvar contexto
+                          </button>
+                        </div>
+                      )}
+                    </div>
 
                     {/* Módulo identificado (editável como override) */}
                     <div>
@@ -457,18 +586,6 @@ export default function TicketsPage() {
                       </div>
                     </div>
 
-                    {/* Transcrição */}
-                    {ticket.conversationTranscript && (
-                      <div>
-                        <p className="text-[11px] font-medium text-[var(--text-muted)] uppercase tracking-[0.1em] mb-1.5">
-                          Transcrição
-                        </p>
-                        <pre className="text-[12px] text-[var(--text-secondary)] bg-[var(--surface-raised)] border border-[var(--surface-border)] rounded-md p-3 whitespace-pre-wrap font-mono leading-relaxed max-h-36 overflow-y-auto">
-                          {ticket.conversationTranscript}
-                        </pre>
-                      </div>
-                    )}
-
                     {/* Loader enquanto pipeline roda */}
                     {isProcessing && (
                       <div className="flex items-center gap-3 bg-amber-500/5 border border-amber-500/20 rounded-md px-4 py-3">
@@ -510,7 +627,24 @@ export default function TicketsPage() {
                       </div>
                     )}
 
-                    {/* Erro de identificação de módulo (422) — módulo não identificado */}
+                    {!isDone && !isProcessing && (ticket.aiSuggestion || editingSuggestion[ticket.id] !== undefined) && (
+                      <div>
+                        <label className="text-[11px] font-medium text-[var(--text-muted)] uppercase tracking-[0.1em] mb-1.5 block">
+                          Feedback para regerar
+                        </label>
+                        <textarea
+                          value={regenerationFeedback[ticket.id] ?? ""}
+                          onChange={(e) =>
+                            setRegenerationFeedback((prev) => ({ ...prev, [ticket.id]: e.target.value }))
+                          }
+                          rows={3}
+                          placeholder='Ex: Não ficou bom. Eu esperava uma regra que fizesse a Sofia responder em até 2 frases curtas e perguntar se pode continuar quando precisar explicar mais.'
+                          className="w-full bg-[var(--surface-raised)] border border-[var(--surface-border)] text-[var(--text-primary)] text-[12px] rounded-md px-3 py-2.5 resize-none focus:outline-none focus:border-[var(--accent)] placeholder:text-[var(--text-disabled)] transition-colors leading-relaxed"
+                        />
+                      </div>
+                    )}
+
+                    {/* Erro de processamento */}
                     {!isProcessing && processError[ticket.id] && (
                       <div className="bg-red-500/5 border border-red-500/20 rounded-md px-4 py-3 space-y-2">
                         <div className="flex items-start gap-2">
@@ -518,8 +652,17 @@ export default function TicketsPage() {
                           <p className="text-[12px] text-red-400">{processError[ticket.id]}</p>
                         </div>
                         <p className="text-[11px] text-[var(--text-disabled)]">
-                          Selecione o módulo manualmente no campo acima e clique em "Salvar e regerar".
+                          Ajuste o problema/contexto ou selecione o módulo manualmente e clique em Analisar agora.
                         </p>
+                        {!isDone && (
+                          <button
+                            onClick={() => handleRegenerate(ticket)}
+                            disabled={savingContext === ticket.id}
+                            className="press text-[12px] text-red-400 hover:text-red-300 border border-red-500/30 px-3 py-1.5 rounded-md transition-colors disabled:opacity-50"
+                          >
+                            Analisar agora
+                          </button>
+                        )}
                       </div>
                     )}
 
@@ -531,8 +674,9 @@ export default function TicketsPage() {
                           A análise automática ainda não foi concluída.
                         </p>
                         <button
-                          onClick={() => handleProcess(ticket.id)}
-                          className="press text-[12px] text-amber-400 hover:text-amber-300 border border-amber-500/30 px-3 py-1.5 rounded-md transition-colors"
+                          onClick={() => handleRegenerate(ticket)}
+                          disabled={savingContext === ticket.id}
+                          className="press text-[12px] text-amber-400 hover:text-amber-300 border border-amber-500/30 px-3 py-1.5 rounded-md transition-colors disabled:opacity-50"
                         >
                           Analisar agora
                         </button>
@@ -560,8 +704,8 @@ export default function TicketsPage() {
 
                             {/* Reprocessar — gera nova sugestão */}
                             <button
-                              onClick={() => handleProcess(ticket.id)}
-                              disabled={applying === ticket.id}
+                              onClick={() => handleRegenerate(ticket)}
+                              disabled={applying === ticket.id || savingContext === ticket.id}
                               className="press text-[12px] text-[var(--text-muted)] hover:text-[var(--text-secondary)] border border-[var(--surface-border)] px-3 py-2 rounded-md transition-colors disabled:opacity-50"
                             >
                               Regerar sugestão

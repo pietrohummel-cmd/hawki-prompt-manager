@@ -53,7 +53,7 @@ Depende de adapters para sistemas de gestão odontológica.
 
 | Pendência | Bloqueia | Razão |
 |---|---|---|
-| API OpenAI configurada para Sofia (produção) | Slice 4 | Hoje Sofia usa Sonnet; produção em escala precisa GPT-4o-mini por custo |
+| API OpenAI configurada para Sofia (produção) | Slice 4 | Decisão atual: Sofia processa prompts em OpenAI. O Prompt Manager deve gerar/corrigir prompts com OpenAI para manter compatibilidade com o executor. |
 | Acesso ao codebase ou API da Sofia | Slice 4 | Para implementar webhook + consulta de prompt em runtime |
 | Webhook URL público estável (deploy Hawki) | Slice 4 | Sofia precisa endpoint fixo para `/api/intelligence/ingest/conversation` |
 | Conta dev Dental Office | Slice 5 | CRM #1 do mercado dental BR |
@@ -288,6 +288,12 @@ Trabalho realizado entre Slice 3 e Slice 4, não previsto no plano original.
 - `feat(generation)` — `generate-prompt.ts` e `import-prompt` migrados de Anthropic para `gpt-4o` (mesmo modelo que Sofia usa em produção — garante prompts calibrados para o executor)
 - `parse-prompt-to-client` mantém Claude Sonnet (extração de campos, papel diferente)
 
+### Correções de tickets alinhadas ao executor OpenAI (2026-05-05)
+- `fix(tickets)` — sugestões de módulo/ticket em `module-editor.ts` migradas para `gpt-4o`; identificação/análise auxiliar pode continuar em modelos de leitura, mas a correção textual do prompt deve usar OpenAI.
+- `fix(tickets)` — tickets agora permitem editar problema/contexto e passar feedback de regeneração ("eu esperava este output") antes de gerar nova sugestão.
+- `fix(prompt-corrections)` — prompts internos de correção passam a exigir padrão Hawki: mudança mínima, regra forte com gatilho + ação + forma, preservação de dados válidos e preferência por comportamento verificável em vez de limite frágil de caracteres.
+- `fix(prompt-corrections)` — cadeia de qualidade aplicada: OpenAI escreve a correção, Anthropic audita como avaliador independente, e apenas se houver falha a crítica volta para OpenAI gerar a versão final. Anthropic não é autor final do prompt aplicado.
+
 ### Melhorias do gerador de prompt (2026-05-05)
 - `ATTENDANCE_FLOW` agora é mode-aware: passos 3-4 variam conforme `schedulingMode` (DIRECT / HANDOFF / LINK) — antes gerava instruções genéricas para todos os modos
 - `restructurePromptToModules`: descrições dos módulos sincronizadas com o spec atual (`ABSOLUTE_RULES` 6-8 regras, TONE_AND_STYLE menciona regra anti-"Entendi que você" e formatação WhatsApp, ATTENDANCE_FLOW menciona DIRECT/HANDOFF/LINK)
@@ -301,8 +307,8 @@ Trabalho realizado entre Slice 3 e Slice 4, não previsto no plano original.
 ### Pré-requisitos externos (resolver antes)
 
 - [ ] Sofia hospedada com endpoint público + capacidade de fazer outbound HTTP
-- [ ] API key OpenAI (ou manter Anthropic) configurada na Sofia
-- [ ] Definição de stack: Sofia migra para GPT-4o-mini ou continua Sonnet?
+- [ ] API key OpenAI configurada na Sofia
+- [x] Definição de stack para prompts: geração/correção no Prompt Manager usa OpenAI porque Sofia processa esses prompts em OpenAI. A decisão de modelo runtime específico (`gpt-4o`, `gpt-4o-mini`, etc.) ainda é operacional/custo.
 - [ ] Acordo de versionamento — Sofia consulta Hawki em runtime ou via push?
 
 ### Tarefas
@@ -439,7 +445,7 @@ A Fase 2 termina quando os seguintes itens são verdadeiros e mensuráveis:
 | Loop autônomo | ≥50% das mudanças de prompt são auto-promovidas (sem clique humano) | Query: `PromptVariant.status = PROMOTED AND auto-flag` / total promoções |
 | Per-clinic | ≥80% dos clientes ativos têm ≥5 insights próprios | Query: `ClientSpecificInsight` count agrupado por client |
 | Defensabilidade mensurável | Insights baseados em outcome geram delta de conversão >10% vs baseline em A/B real | `PromptVariant.outcomeDelta` médio para variants com `source=INSIGHT_ACTIVATION` |
-| Custo unit | Custo de processar 1 conversa (anonymização + score + match) < R$0,05 | Soma de tokens Anthropic + chamadas externas / total de conversas |
+| Custo unit | Custo de processar 1 conversa (anonymização + score + match) < R$0,05 | Soma de tokens OpenAI/Anthropic + chamadas externas / total de conversas |
 
 Sem essas métricas, a Fase 2 é só feature work. Com elas, o moat é real e auditável.
 
@@ -449,7 +455,7 @@ Sem essas métricas, a Fase 2 é só feature work. Com elas, o moat é real e au
 
 Registrar aqui antes de começar cada slice. Atualizar conforme decisões são tomadas.
 
-- [ ] **Stack do Sofia em produção:** continua Anthropic (Sonnet) ou migra para OpenAI (GPT-4o-mini) para reduzir custo unit? Decisão impacta Slice 4 diretamente.
+- [x] **Stack de geração/correção de prompts:** usar OpenAI no Prompt Manager porque Sofia processa os prompts em OpenAI em produção. Pendência remanescente: escolher o modelo runtime/custo exato da Sofia (`gpt-4o`, `gpt-4o-mini`, etc.) no Slice 4.
 - [ ] **Modelo de cobrança:** Hawki é cobrado separado da Sofia ou bundled? Afeta como apresentamos as métricas de impacto da inteligência.
 - [ ] **Quem cura conversas em escala:** equipe Hawki centralizada ou clínica revisa as próprias? Afeta UX da Slice 1.
 - [ ] **Threshold de auto-aprovação:** começamos conservador (`scoreQuality > 0.85 AND scheduled`)? Quanto isso filtra na prática? Validar no mês 1.
@@ -462,7 +468,7 @@ Registrar aqui antes de começar cada slice. Atualizar conforme decisões são t
 | Risco | Mitigação |
 |---|---|
 | CRMs odontológicos não têm API pública decente | Fallback: webhook reverso (cliente posta no Hawki via integração nativa do CRM) ou export CSV manual semanal |
-| Sofia em produção em stack diferente do esperado | Slice 4 vira "agnostic" com SDK leve em Node + Python. Tempo +30%. |
+| Sofia em produção em modelo OpenAI diferente do gerador | Manter geração/correção no Prompt Manager em OpenAI e validar com regressão/simulação; se o runtime for `gpt-4o-mini`, calibrar casos críticos antes de promover. |
 | Conversas reais têm dados sensíveis que regex+NER não pegam | Slice 0 já endereça via `ANONYMIZATION_LEVEL=strict` (revisão humana obrigatória) — uso default em Slice 4 até confiança em NER subir |
 | Outcome data tem alta latência (paciente fecha tratamento 30 dias depois) | Outcome é evento, não snapshot. `ConversationOutcome` aceita updates incrementais (scheduled → showedUp → treatmentClosed → revenueCents) ao longo do tempo |
 | Variantes A/B causam regressão silenciosa em produção | Rollback automático em janela de 100 conversas + monitor de outcome contínuo |

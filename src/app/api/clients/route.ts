@@ -23,6 +23,7 @@ const createClientSchema = z.object({
     .optional(),
   schedulingMode: z.enum(["DIRECT", "HANDOFF", "LINK"]).optional(),
   tone: z.enum(["FORMAL", "INFORMAL_MODERATE", "CASUAL"]).optional(),
+  salesApproach: z.enum(["DIRECT", "BALANCED", "CONSULTATIVE_SPIN", "ADAPTIVE"]).optional(),
   targetAudience: z.string().optional(),
   ageRange: z.string().optional(),
   restrictions: z.string().optional(),

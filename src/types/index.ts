@@ -7,6 +7,7 @@ import type {
   SchedulingMode,
   SchedulingSystem,
   ClientTone,
+  ClientSalesApproach,
   ClientStatus,
   TicketPriority,
   TicketStatus,
@@ -22,6 +23,7 @@ export type {
   SchedulingMode,
   SchedulingSystem,
   ClientTone,
+  ClientSalesApproach,
   ClientStatus,
   TicketPriority,
   TicketStatus,
@@ -50,6 +52,7 @@ export interface ParsedOnboardingData {
   technologies?: string;
   differentials?: string;
   tone?: string;
+  salesApproach?: string;
   targetAudience?: string;
   ageRange?: string;
   paymentInfo?: string;

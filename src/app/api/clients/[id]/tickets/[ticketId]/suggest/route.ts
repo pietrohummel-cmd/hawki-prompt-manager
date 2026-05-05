@@ -9,13 +9,18 @@ import { suggestTicketCorrection } from "@/lib/module-editor";
  * Salva a sugestão no ticket e muda o status para SUGGESTED.
  */
 export async function POST(
-  _request: Request,
+  request: Request,
   { params }: { params: Promise<{ id: string; ticketId: string }> }
 ) {
   const { userId } = await auth();
   if (!userId) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
   const { id, ticketId } = await params;
+  const body = await request.json().catch(() => ({}));
+  const regenerationFeedback =
+    typeof body.regenerationFeedback === "string" && body.regenerationFeedback.trim()
+      ? body.regenerationFeedback.trim()
+      : null;
 
   const ticket = await prisma.correctionTicket.findFirst({
     where: { id: ticketId, clientId: id },
@@ -43,7 +48,8 @@ export async function POST(
       ticket.affectedModule,
       currentContent,
       ticket.description,
-      ticket.conversationTranscript
+      ticket.conversationTranscript,
+      regenerationFeedback
     );
 
     const updated = await prisma.correctionTicket.update({
