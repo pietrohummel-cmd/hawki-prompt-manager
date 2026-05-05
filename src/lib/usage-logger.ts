@@ -1,8 +1,9 @@
 import { prisma } from "@/lib/prisma";
 
-// Preços Anthropic (por token). Fonte: https://anthropic.com/pricing
+// Preços por token. Fontes: anthropic.com/pricing | openai.com/pricing
 // Atualizar se os preços mudarem.
 const PRICING: Record<string, { inputPerToken: number; outputPerToken: number }> = {
+  // ── Anthropic ──────────────────────────────────────────────────────────────
   "claude-sonnet-4-6": {
     inputPerToken: 3.0 / 1_000_000,   // $3.00 por milhão de tokens de entrada
     outputPerToken: 15.0 / 1_000_000, // $15.00 por milhão de tokens de saída
@@ -10,6 +11,16 @@ const PRICING: Record<string, { inputPerToken: number; outputPerToken: number }>
   "claude-haiku-4-5-20251001": {
     inputPerToken: 0.80 / 1_000_000,  // $0.80 por milhão de tokens de entrada
     outputPerToken: 4.0 / 1_000_000,  // $4.00 por milhão de tokens de saída
+  },
+  // ── OpenAI ─────────────────────────────────────────────────────────────────
+  // Usado em generate_prompt e import_restructure (Sofia roda em GPT-4o)
+  "gpt-4o": {
+    inputPerToken: 2.50 / 1_000_000,  // $2.50 por milhão de tokens de entrada
+    outputPerToken: 10.0 / 1_000_000, // $10.00 por milhão de tokens de saída
+  },
+  "gpt-4o-mini": {
+    inputPerToken: 0.15 / 1_000_000,  // $0.15 por milhão de tokens de entrada
+    outputPerToken: 0.60 / 1_000_000, // $0.60 por milhão de tokens de saída
   },
 };
 

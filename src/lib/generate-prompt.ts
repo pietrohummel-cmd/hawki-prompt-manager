@@ -1,4 +1,4 @@
-import Anthropic from "@anthropic-ai/sdk";
+import OpenAI from "openai";
 import type { Client, ModuleKey } from "@/generated/prisma";
 import { MODULE_ORDER } from "@/lib/prompt-constants";
 import { logUsage } from "@/lib/usage-logger";
@@ -7,8 +7,13 @@ import { fetchRelevantKnowledge, fetchClientSpecificKnowledge, formatKnowledgeBl
 
 export { MODULE_LABELS, MODULE_ORDER } from "@/lib/prompt-constants";
 
-function getAnthropic() {
-  return new Anthropic({ apiKey: process.env.HAWKI_ANTHROPIC_API_KEY });
+// Sofia roda em GPT-4o em produção — gerar o prompt com o mesmo modelo
+// que vai executá-lo garante que o output seja assertivo e bem calibrado.
+// Para trocar o modelo basta alterar esta constante (ex: "gpt-4o-mini").
+const GENERATION_MODEL = "gpt-4o";
+
+function getOpenAI() {
+  return new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 }
 
 export function buildClientContext(client: Client): string {
@@ -352,15 +357,22 @@ FORMATO DE SAÍDA OBRIGATÓRIO — use EXATAMENTE esta estrutura e esta ordem:
 PROMPT ORIGINAL A REORGANIZAR:
 ${rawText}`;
 
-  const message = await getAnthropic().messages.create({
-    model: "claude-sonnet-4-6",
+  const completion = await getOpenAI().chat.completions.create({
+    model: GENERATION_MODEL,
     max_tokens: 8192,
     messages: [{ role: "user", content: prompt }],
   });
 
-  await logUsage({ operation: "import_restructure", model: "claude-sonnet-4-6", usage: message.usage });
+  await logUsage({
+    operation: "import_restructure",
+    model: GENERATION_MODEL,
+    usage: {
+      input_tokens:  completion.usage?.prompt_tokens     ?? 0,
+      output_tokens: completion.usage?.completion_tokens ?? 0,
+    },
+  });
 
-  const text = message.content[0].type === "text" ? message.content[0].text : "";
+  const text = completion.choices[0]?.message.content ?? "";
   const modules = parseModules(text);
 
   const missing = MODULE_ORDER.filter((key) => !modules[key]);
@@ -393,20 +405,23 @@ export async function generateClientPrompt(client: Client): Promise<{
       )
     : basePrompt;
 
-  const message = await getAnthropic().messages.create({
-    model: "claude-sonnet-4-6",
+  const completion = await getOpenAI().chat.completions.create({
+    model: GENERATION_MODEL,
     max_tokens: 8192,
-    messages: [
-      {
-        role: "user",
-        content: generationPrompt,
-      },
-    ],
+    messages: [{ role: "user", content: generationPrompt }],
   });
 
-  await logUsage({ clientId: client.id, operation: "generate_prompt", model: "claude-sonnet-4-6", usage: message.usage });
+  await logUsage({
+    clientId: client.id,
+    operation: "generate_prompt",
+    model: GENERATION_MODEL,
+    usage: {
+      input_tokens:  completion.usage?.prompt_tokens     ?? 0,
+      output_tokens: completion.usage?.completion_tokens ?? 0,
+    },
+  });
 
-  const text = message.content[0].type === "text" ? message.content[0].text : "";
+  const text = completion.choices[0]?.message.content ?? "";
   const modules = parseModules(text);
 
   // Monta o systemPrompt completo concatenando todos os módulos
