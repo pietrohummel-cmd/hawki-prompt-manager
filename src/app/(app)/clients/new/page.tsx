@@ -266,17 +266,18 @@ export default function NewClientPage() {
     //   corrigir e clicar novamente sem precisar colar o prompt outra vez.
 
     try {
-      // ── Fase 1: cria o registro do cliente (ou reutiliza se já criado) ──────
+      // ── Fase 1: cria o registro do cliente (ou sincroniza se já criado) ──────
       let clientId = createdClientId;
 
-      if (!clientId) {
-        const payload = {
-          ...Object.fromEntries(
-            Object.entries(data).filter(([, v]) => v !== "" && v !== undefined)
-          ),
-          serviceCategories: data.serviceCategories ?? [],
-        };
+      const payload = {
+        ...Object.fromEntries(
+          Object.entries(data).filter(([, v]) => v !== "" && v !== undefined)
+        ),
+        serviceCategories: data.serviceCategories ?? [],
+      };
 
+      if (!clientId) {
+        // Primeira tentativa — cria o cliente
         const res = await fetch("/api/clients", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -291,6 +292,20 @@ export default function NewClientPage() {
         const client = await res.json() as { id: string };
         clientId = client.id;
         setCreatedClientId(clientId); // preserva para retry sem duplicar
+      } else {
+        // Retry após falha na fase 2 — sincroniza edições do formulário com o
+        // registro já criado antes de tentar novamente. Sem isso, qualquer
+        // correção feita pelo operador seria ignorada e a fase 2 rodaria contra
+        // dados desatualizados.
+        const patchRes = await fetch(`/api/clients/${clientId}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+        });
+        if (!patchRes.ok) {
+          const patchErr = await patchRes.json().catch(() => ({})) as { error?: string };
+          throw new Error(patchErr.error ?? "Erro ao atualizar dados do cliente antes de tentar novamente");
+        }
       }
 
       // ── Fase 2: import / generate ────────────────────────────────────────────

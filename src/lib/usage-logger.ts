@@ -25,10 +25,11 @@ const PRICING: Record<string, { inputPerToken: number; outputPerToken: number }>
 };
 
 // Estimativa de custo de uma geração completa de prompt (usado para calcular economia)
-// Baseado em média observada: ~3.500 tokens entrada + ~7.000 tokens saída no Sonnet
+// Baseado em média observada: ~3.500 tokens entrada + ~7.000 tokens saída no GPT-4o
+// Atualizado junto com a migração de generate_prompt / import_restructure para GPT-4o.
 export const ESTIMATED_FULL_REGEN_COST_USD =
-  3_500 * PRICING["claude-sonnet-4-6"].inputPerToken +
-  7_000 * PRICING["claude-sonnet-4-6"].outputPerToken;
+  3_500 * PRICING["gpt-4o"].inputPerToken +
+  7_000 * PRICING["gpt-4o"].outputPerToken;
 
 export type OperationType =
   | "generate_prompt"
