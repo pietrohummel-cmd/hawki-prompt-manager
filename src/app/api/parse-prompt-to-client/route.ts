@@ -133,19 +133,24 @@ ${rawText}
     });
 
     const raw = message.content[0].type === "text" ? message.content[0].text : "";
-    // Remove markdown code fences se o modelo os incluir por acidente
-    const jsonText = raw
-      .replace(/^```(?:json)?\s*/i, "")
-      .replace(/\s*```$/, "")
-      .trim();
+
+    // Extrai o objeto JSON localizando o primeiro '{' e o último '}'.
+    // Essa estratégia é robusta contra markdown (```json ... ```), texto
+    // introdutório ("Aqui está o JSON:") e qualquer outro envoltório que
+    // o modelo possa adicionar mesmo com a instrução "sem markdown".
+    const firstBrace = raw.indexOf("{");
+    const lastBrace  = raw.lastIndexOf("}");
+    const jsonText   = firstBrace !== -1 && lastBrace > firstBrace
+      ? raw.slice(firstBrace, lastBrace + 1)
+      : raw.trim();
 
     let extracted: Record<string, unknown>;
     try {
       extracted = JSON.parse(jsonText);
     } catch {
-      console.error("[parse-prompt-to-client] JSON parse error. Resposta:", jsonText.slice(0, 300));
+      console.error("[parse-prompt-to-client] JSON parse error. Raw:", raw.slice(0, 400));
       return NextResponse.json(
-        { error: "O modelo retornou uma resposta inválida. Tente novamente." },
+        { error: "Não foi possível extrair os dados do prompt. Tente novamente ou preencha o formulário manualmente." },
         { status: 422 }
       );
     }

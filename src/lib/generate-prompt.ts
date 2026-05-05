@@ -13,6 +13,11 @@ export { MODULE_LABELS, MODULE_ORDER } from "@/lib/prompt-constants";
 const GENERATION_MODEL = "gpt-4o";
 
 function getOpenAI() {
+  if (!process.env.OPENAI_API_KEY) {
+    throw new Error(
+      "OPENAI_API_KEY não configurada. Adicione ao .env.local e reinicie o servidor."
+    );
+  }
   return new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 }
 

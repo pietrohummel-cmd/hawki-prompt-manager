@@ -142,6 +142,9 @@ export default function NewClientPage() {
   // Form state
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Quando a fase 1 (criação do cliente) já passou mas a fase 2 falhou,
+  // preservamos o clientId para que o retry pule a criação e não duplique.
+  const [createdClientId, setCreatedClientId] = useState<string | null>(null);
 
   // Computed: se há texto colado, entramos no modo de importação
   const hasExistingPrompt = existingPromptText.trim().length > 0;
@@ -252,60 +255,72 @@ export default function NewClientPage() {
     setSaving(true);
     setError(null);
 
-    // Fix Codex #1: onSubmit em duas fases.
-    // Fase 1 — criação do cliente: qualquer erro mantém o operador no formulário.
-    // Fase 2 — import/generate: o cliente JÁ EXISTE; erros redirecionam para a aba
-    //   Prompt (onde o operador pode retentar manualmente) em vez de permanecerem no
-    //   formulário, o que causaria criação de clientes duplicados ao tentar novamente.
+    // onSubmit em duas fases com retry seguro:
+    //
+    // Fase 1 — criação do cliente: só corre se ainda não temos um clientId do
+    //   formulário atual. Se já criamos o cliente mas a fase 2 falhou, o retry
+    //   usa o clientId salvo e pula diretamente para a fase 2 — sem duplicar.
+    //
+    // Fase 2 — import/generate: se falhar, mantém o operador NO formulário com
+    //   o texto do prompt intacto + mensagem de erro clara. O operador pode
+    //   corrigir e clicar novamente sem precisar colar o prompt outra vez.
 
     try {
-      // ── Fase 1: cria o registro do cliente ──────────────────────────────────
-      const payload = {
-        ...Object.fromEntries(
-          Object.entries(data).filter(([, v]) => v !== "" && v !== undefined)
-        ),
-        serviceCategories: data.serviceCategories ?? [],
-      };
+      // ── Fase 1: cria o registro do cliente (ou reutiliza se já criado) ──────
+      let clientId = createdClientId;
 
-      const res = await fetch("/api/clients", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
-      });
+      if (!clientId) {
+        const payload = {
+          ...Object.fromEntries(
+            Object.entries(data).filter(([, v]) => v !== "" && v !== undefined)
+          ),
+          serviceCategories: data.serviceCategories ?? [],
+        };
 
-      if (!res.ok) {
-        const err = await res.json() as { error?: string; detail?: string };
-        throw new Error(err.detail ? `${err.error}: ${err.detail}` : (err.error ?? "Erro ao salvar cliente"));
-      }
+        const res = await fetch("/api/clients", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+        });
 
-      const { id: clientId } = await res.json() as { id: string };
-
-      // ── Fase 2: import / generate — erros não ficam no formulário ───────────
-      try {
-        if (hasExistingPrompt) {
-          const importRes = await fetch(`/api/clients/${clientId}/import-prompt`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ rawText: existingPromptText }),
-          });
-          if (!importRes.ok) {
-            console.warn("[new-client] import-prompt falhou — operador pode retentar na aba Prompt.");
-          }
-        } else {
-          const genRes = await fetch(`/api/clients/${clientId}/generate-prompt`, { method: "POST" });
-          if (!genRes.ok) {
-            console.warn("[new-client] generate-prompt falhou — operador pode gerar manualmente na aba Prompt.");
-          }
+        if (!res.ok) {
+          const err = await res.json() as { error?: string; detail?: string };
+          throw new Error(err.detail ? `${err.error}: ${err.detail}` : (err.error ?? "Erro ao salvar cliente"));
         }
-      } catch (promptErr) {
-        console.warn("[new-client] Erro inesperado em import/generate:", promptErr);
+
+        const client = await res.json() as { id: string };
+        clientId = client.id;
+        setCreatedClientId(clientId); // preserva para retry sem duplicar
       }
 
-      // Sempre redireciona para a aba Prompt — o cliente foi criado com sucesso.
+      // ── Fase 2: import / generate ────────────────────────────────────────────
+      if (hasExistingPrompt) {
+        const importRes = await fetch(`/api/clients/${clientId}/import-prompt`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ rawText: existingPromptText }),
+        });
+        if (!importRes.ok) {
+          const importErr = await importRes.json().catch(() => ({})) as { error?: string };
+          throw new Error(
+            importErr.error ??
+            "Falha ao importar o prompt. Seu texto ainda está disponível — clique em 'Salvar e importar prompt' para tentar novamente."
+          );
+        }
+      } else {
+        const genRes = await fetch(`/api/clients/${clientId}/generate-prompt`, { method: "POST" });
+        if (!genRes.ok) {
+          const genErr = await genRes.json().catch(() => ({})) as { error?: string };
+          throw new Error(
+            genErr.error ??
+            "Falha ao gerar o prompt. Clique em 'Salvar e gerar prompt' para tentar novamente."
+          );
+        }
+      }
+
       router.push(`/clients/${clientId}/prompt`);
 
     } catch (err) {
-      // Só chega aqui se a CRIAÇÃO do cliente falhou (fase 1).
       setError(err instanceof Error ? err.message : "Erro desconhecido");
     } finally {
       setSaving(false);
