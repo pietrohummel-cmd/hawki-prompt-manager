@@ -41,6 +41,7 @@ export type OperationType =
   | "pipeline_fix"
   | "interaction_score"
   | "knowledge_distill"
+  | "distill_client_insights"
   | "transcript_anonymize"
   | "parse_prompt_to_client";
 

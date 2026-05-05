@@ -168,10 +168,11 @@ enum OutcomeSource {
 
 ---
 
-## Slice 2 — Camada per-clinic ✅ concluída (2026-05-02)
+## Slice 2 — Camada per-clinic ✅ concluída (2026-05-02 → 2026-05-05)
 
 **Commits:**
 - `eb8ca2b` — Slice 2: ClientSpecificInsight schema + endpoints + UI /clients/[id]/insights + injeção em duas camadas
+- `(pendente)` — Slice 2.1: "Destilar do meu histórico" — endpoint POST /distill + elegibilidade GET + botão na UI
 
 **Objetivo:** segundo nível de conhecimento que pertence à clínica específica. Cria switching cost real — sair do Sofia significa perder a personalidade acumulada.
 
@@ -204,7 +205,7 @@ enum ClientInsightSource { MANUAL DISTILLED_FROM_OWN_HISTORY }
 3. ✅ UI `/clients/[id]/insights` — gestão de insights da clínica (nova aba no client-nav)
 4. ✅ Função `fetchClientSpecificKnowledge(clientId, categories)` em `knowledge-injector.ts`
 5. ✅ Injeção em **duas camadas** no `generate-prompt.ts` (cross-tenant + per-clinic em paralelo)
-6. ⬜ **Bonus:** botão "Destilar do meu histórico" — quando a clínica tem ≥20 conversas próprias aprovadas, gera insights só dela (Slice 2.1 futuro)
+6. ✅ **Slice 2.1:** botão "Destilar do meu histórico" — quando a clínica tem ≥20 ConversationSample registrados, GPT-4o analisa o histórico e gera 3-5 rascunhos de ClientSpecificInsight com source=DISTILLED_FROM_OWN_HISTORY para revisão humana antes de ativar
 
 ### Critério de pronto
 - 1 cliente piloto com 5 insights próprios cadastrados
@@ -271,6 +272,25 @@ enum VariantStatus    { PENDING TESTING WON LOST PROMOTED ROLLED_BACK }
 - Regressão roda em background (~30s)
 - Dashboard mostra delta vs baseline com cor
 - Promoção manual ou automática funciona; rollback funciona
+
+---
+
+## Adições fora dos slices ✅ concluídas (2026-05-05)
+
+Trabalho realizado entre Slice 3 e Slice 4, não previsto no plano original.
+
+### Migração de clientes existentes (copy-paste de prompt)
+- `feat(clients)` — fluxo de migração: textarea no topo do `/clients/new`, extração de campos via IA (`POST /api/parse-prompt-to-client`, Claude Sonnet), preenchimento automático do formulário
+- `feat(clients)` — import de prompt existente: ao criar, se há prompt colado, chama `/api/clients/[id]/import-prompt` (reestrutura para módulos atuais via GPT-4o) em vez de gerar do zero
+- Codex adversarial review aplicado: `createdClientId` para retry seguro na fase 2, `EXTRACTION_FIELDS` reset antes de cada extração, null-guard em `getOpenAI()`
+
+### Migração de gerador para OpenAI GPT-4o
+- `feat(generation)` — `generate-prompt.ts` e `import-prompt` migrados de Anthropic para `gpt-4o` (mesmo modelo que Sofia usa em produção — garante prompts calibrados para o executor)
+- `parse-prompt-to-client` mantém Claude Sonnet (extração de campos, papel diferente)
+
+### Melhorias do gerador de prompt (2026-05-05)
+- `ATTENDANCE_FLOW` agora é mode-aware: passos 3-4 variam conforme `schedulingMode` (DIRECT / HANDOFF / LINK) — antes gerava instruções genéricas para todos os modos
+- `restructurePromptToModules`: descrições dos módulos sincronizadas com o spec atual (`ABSOLUTE_RULES` 6-8 regras, TONE_AND_STYLE menciona regra anti-"Entendi que você" e formatação WhatsApp, ATTENDANCE_FLOW menciona DIRECT/HANDOFF/LINK)
 
 ---
 

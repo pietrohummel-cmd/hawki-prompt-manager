@@ -2,7 +2,7 @@
 
 import { useEffect, useState, useCallback } from "react";
 import { useParams } from "next/navigation";
-import { Plus, Sparkles, Pencil, Trash2, CheckCircle, Circle, X, ChevronDown } from "lucide-react";
+import { Plus, Sparkles, Pencil, Trash2, CheckCircle, Circle, X, ChevronDown, Wand2 } from "lucide-react";
 import { CATEGORY_LABELS } from "@/lib/intelligence-constants";
 import type { ServiceCategory, KnowledgeStatus, ClientInsightSource } from "@/generated/prisma";
 
@@ -300,18 +300,30 @@ function InsightRow({
 
 export default function InsightsPage() {
   const { id } = useParams<{ id: string }>();
-  const [insights, setInsights] = useState<ClientInsight[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-  const [showForm, setShowForm] = useState(false);
-  const [editingId, setEditingId] = useState<string | null>(null);
-  const [saving, setSaving] = useState(false);
+  const [insights, setInsights]               = useState<ClientInsight[]>([]);
+  const [loading, setLoading]                 = useState(true);
+  const [error, setError]                     = useState<string | null>(null);
+  const [showForm, setShowForm]               = useState(false);
+  const [editingId, setEditingId]             = useState<string | null>(null);
+  const [saving, setSaving]                   = useState(false);
+  const [distilling, setDistilling]           = useState(false);
+  const [distillError, setDistillError]       = useState<string | null>(null);
+  const [conversationCount, setConversationCount] = useState<number | null>(null);
 
   const fetchInsights = useCallback(async () => {
     try {
-      const res = await fetch(`/api/clients/${id}/specific-insights`);
-      if (!res.ok) throw new Error("Erro ao carregar insights");
-      setInsights(await res.json());
+      // Busca insights e elegibilidade de destilação em paralelo
+      const [insightsRes, eligRes] = await Promise.all([
+        fetch(`/api/clients/${id}/specific-insights`),
+        fetch(`/api/clients/${id}/specific-insights/distill`),
+      ]);
+      if (!insightsRes.ok) throw new Error("Erro ao carregar insights");
+      const [insightsData, eligData] = await Promise.all([
+        insightsRes.json(),
+        eligRes.ok ? eligRes.json() : null,
+      ]);
+      setInsights(insightsData);
+      if (eligData) setConversationCount(eligData.count);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Erro");
     } finally {
@@ -385,6 +397,23 @@ export default function InsightsPage() {
     }
   }
 
+  async function handleDistill() {
+    setDistilling(true);
+    setDistillError(null);
+    try {
+      const res = await fetch(`/api/clients/${id}/specific-insights/distill`, {
+        method: "POST",
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error ?? `HTTP ${res.status}`);
+      await fetchInsights(); // recarrega lista com os novos rascunhos
+    } catch (err) {
+      setDistillError(err instanceof Error ? err.message : "Erro ao destilar");
+    } finally {
+      setDistilling(false);
+    }
+  }
+
   const activeInsights   = insights.filter((i) => i.status === "ACTIVE");
   const draftInsights    = insights.filter((i) => i.status === "DRAFT");
   const archivedInsights = insights.filter((i) => i.status === "ARCHIVED");
@@ -417,20 +446,46 @@ export default function InsightsPage() {
               {activeInsights.length} insight{activeInsights.length !== 1 ? "s" : ""} ativo{activeInsights.length !== 1 ? "s" : ""} — sendo injetado{activeInsights.length !== 1 ? "s" : ""} na próxima geração
             </p>
           )}
+          {conversationCount !== null && conversationCount < 20 && (
+            <p className="text-xs text-[var(--text-disabled)] mt-1">
+              {conversationCount}/20 conversas para habilitar destilação automática
+            </p>
+          )}
         </div>
-        <button
-          onClick={() => { setShowForm(true); setEditingId(null); }}
-          className="flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium bg-[var(--accent)] hover:bg-[var(--accent-hover)] text-white rounded-lg transition-colors shrink-0"
-        >
-          <Plus size={14} />
-          Novo insight
-        </button>
+        <div className="flex items-center gap-2 shrink-0">
+          {conversationCount !== null && conversationCount >= 20 && (
+            <button
+              onClick={handleDistill}
+              disabled={distilling}
+              title={`Destilar insights das ${conversationCount} conversas desta clínica`}
+              className="flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium border border-[var(--accent)]/40 text-[var(--accent)] hover:bg-[var(--accent)]/5 disabled:opacity-50 rounded-lg transition-colors"
+            >
+              <Wand2 size={14} className={distilling ? "animate-spin" : ""} />
+              {distilling ? "Destilando..." : "Destilar do histórico"}
+            </button>
+          )}
+          <button
+            onClick={() => { setShowForm(true); setEditingId(null); }}
+            className="flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium bg-[var(--accent)] hover:bg-[var(--accent-hover)] text-white rounded-lg transition-colors"
+          >
+            <Plus size={14} />
+            Novo insight
+          </button>
+        </div>
       </div>
 
-      {/* Error */}
+      {/* Errors */}
       {error && (
         <div className="rounded-xl border border-red-500/30 bg-red-500/5 px-4 py-3 text-sm text-red-400">
           <span className="font-medium">Erro:</span> {error}
+        </div>
+      )}
+      {distillError && (
+        <div className="rounded-xl border border-red-500/30 bg-red-500/5 px-4 py-3 text-sm text-red-400 flex items-start justify-between gap-3">
+          <span><span className="font-medium">Erro na destilação:</span> {distillError}</span>
+          <button onClick={() => setDistillError(null)} className="shrink-0 text-red-400/60 hover:text-red-400 transition-colors">
+            <X size={13} />
+          </button>
         </div>
       )}
 
@@ -578,9 +633,10 @@ export default function InsightsPage() {
       <div className="rounded-xl border border-[var(--border)]/50 bg-[var(--background)] p-3 text-[11px] text-[var(--text-muted)] flex gap-2">
         <Sparkles size={12} className="text-[var(--accent)] shrink-0 mt-0.5" />
         <span>
-          <strong className="text-[var(--text-primary)]">Como funciona:</strong> insights ativos desta clínica são injetados na
-          seção <em>&ldquo;Tom e Posicionamento desta Clínica&rdquo;</em> do prompt, após os padrões cross-tenant da categoria.
-          Isso cria um segundo nível de personalização — o switching cost real.
+          <strong className="text-[var(--text-primary)]">Como funciona:</strong> insights ativos são injetados na
+          seção <em>&ldquo;Tom e Posicionamento desta Clínica&rdquo;</em> do prompt, após os padrões cross-tenant.
+          Com 20+ conversas registradas, o botão <strong className="text-[var(--text-primary)]">Destilar do histórico</strong> analisa
+          o histórico real desta clínica e gera rascunhos automáticos para revisão — o switching cost que cresce sozinho.
         </span>
       </div>
     </div>
