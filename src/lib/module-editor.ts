@@ -87,6 +87,7 @@ function buildHawkiCorrectionBrief(moduleKey: ModuleKey): string {
 - Se o problema é comportamento repetido, adicione uma regra operacional no módulo certo e, quando útil, um exemplo curto.
 - Preserve estado conversacional: não repita saudação/apresentação em turnos seguintes; responda a última intenção do paciente antes de avançar no funil.
 - Preserve a condução configurada do cliente: direto, equilibrado, consultivo/SPIN ou adaptativo. Se ajustar SPIN, use 1 pergunta por mensagem e conecte dor/objetivo ao agendamento sem pressão.
+- Se o problema for falta de condução, transforme em critério de saída da mensagem: resposta informativa sem mídia deve terminar com 1 pergunta consultiva ou próximo passo de agenda, não apenas com informação.
 - Uma mensagem deve ter uma ação principal. Quando houver envio de mídia/link/documento, a correção deve instruir a parar e aguardar a resposta do paciente.
 - Se o problema envolver campanha, ação sazonal, condição temporária, preço, condição comercial, pagamento ou parcelamento, a correção deve obrigar consulta à KB/search_knowledge quando disponível e proibir inferências comerciais.
 - Para clínicas premium/boutique, nunca transformar "campanha" em "promoção", "oferta", "desconto", "facilidade" ou "parcelamento" se a KB não usar literalmente esses termos.
