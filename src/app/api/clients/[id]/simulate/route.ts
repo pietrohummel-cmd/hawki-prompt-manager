@@ -6,7 +6,7 @@ import { prisma } from "@/lib/prisma";
 import { MODULE_ORDER } from "@/lib/prompt-constants";
 import type { ModuleKey } from "@/generated/prisma";
 
-const SIMULATION_MODEL = "gpt-4o";
+const SIMULATION_MODEL = process.env.HAWKI_SIMULATION_MODEL ?? process.env.SOFIA_RUNTIME_MODEL ?? "gpt-4o-mini";
 
 function getOpenAI() {
   if (!process.env.OPENAI_API_KEY) {

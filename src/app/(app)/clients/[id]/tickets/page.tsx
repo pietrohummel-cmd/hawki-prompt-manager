@@ -224,9 +224,10 @@ export default function TicketsPage() {
   }
 
   async function handleRegenerate(ticket: TicketItem) {
+    const feedback = regenerationFeedback[ticket.id];
     const saved = await handleSaveContext(ticket);
     if (!saved) return;
-    await handleProcess(saved.id, regenerationFeedback[ticket.id]);
+    await handleProcess(saved.id, feedback);
   }
 
   async function handleCreate() {

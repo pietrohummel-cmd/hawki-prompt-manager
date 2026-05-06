@@ -302,15 +302,7 @@ Mantenha todas as informações corretas da clínica. Responda APENAS com o cont
   });
 
   const proposedContent = completion.choices[0]?.message.content?.trim() ?? "";
-  if (!proposedContent) return "";
-
-  return auditAndRefinePromptCorrection({
-    clientId: client.id,
-    moduleKey,
-    currentContent,
-    problemDescription: "Melhorar o módulo seguindo as diretrizes Hawki e preservando informações válidas.",
-    proposedContent,
-  });
+  return proposedContent;
 }
 
 /**

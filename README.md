@@ -42,6 +42,7 @@ cp .env.example .env.local
 Preencha o `.env.local` com as credenciais (peça ao Pietro):
 - `DATABASE_URL` — Supabase PostgreSQL
 - `OPENAI_API_KEY` — geração/correção de prompts
+- `SOFIA_RUNTIME_MODEL` — modelo esperado da Sofia em produção, usado como padrão na simulação
 - `HAWKI_ANTHROPIC_API_KEY` — fluxos auxiliares que ainda usam Anthropic
 - `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY` + `CLERK_SECRET_KEY` — dashboard.clerk.com
 - `NEXT_PUBLIC_SUPABASE_URL` + chaves Supabase
@@ -75,4 +76,5 @@ O prompt de cada cliente é dividido em 10 módulos (`###MÓDULO:KEY###`):
 | Gerar prompt completo | `gpt-4o` | Mesmo stack que processa o prompt na Sofia em produção |
 | Sugerir módulo / ticket | `gpt-4o` | Correções calibradas para o executor real do prompt |
 | Importar/reorganizar prompt | `gpt-4o` | Mantém módulos atuais e linguagem compatível com Sofia |
+| Simulação local | `SOFIA_RUNTIME_MODEL` ou `HAWKI_SIMULATION_MODEL` | Evita falsa confiança simulando com modelo diferente do runtime |
 | Extração/análise/scoring auxiliares | Claude Sonnet/Haiku | Tarefas de leitura, NER, scoring ou destilação que não geram o prompt final |

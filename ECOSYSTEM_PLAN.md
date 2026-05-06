@@ -308,7 +308,7 @@ Trabalho realizado entre Slice 3 e Slice 4, não previsto no plano original.
 
 - [ ] Sofia hospedada com endpoint público + capacidade de fazer outbound HTTP
 - [ ] API key OpenAI configurada na Sofia
-- [x] Definição de stack para prompts: geração/correção no Prompt Manager usa OpenAI porque Sofia processa esses prompts em OpenAI. A decisão de modelo runtime específico (`gpt-4o`, `gpt-4o-mini`, etc.) ainda é operacional/custo.
+- [x] Definição de stack para prompts: geração/correção no Prompt Manager usa OpenAI porque Sofia processa esses prompts em OpenAI. A simulação usa `SOFIA_RUNTIME_MODEL` por padrão, com override opcional em `HAWKI_SIMULATION_MODEL`, para evitar validar com um modelo diferente do runtime.
 - [ ] Acordo de versionamento — Sofia consulta Hawki em runtime ou via push?
 
 ### Tarefas

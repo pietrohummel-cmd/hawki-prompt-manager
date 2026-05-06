@@ -133,6 +133,8 @@ O `ClientNav` em `src/components/client-nav.tsx` renderiza todas as tabs + botã
 ```
 DATABASE_URL                        # Transaction pooler Supabase (porta 6543)
 OPENAI_API_KEY                      # geração/correção de prompts
+SOFIA_RUNTIME_MODEL                 # modelo esperado da Sofia em produção; simulação usa este valor por padrão
+HAWKI_SIMULATION_MODEL              # override opcional só para a aba Simulação
 HAWKI_ANTHROPIC_API_KEY             # fluxos auxiliares
 NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY
 CLERK_SECRET_KEY
