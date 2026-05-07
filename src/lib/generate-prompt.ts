@@ -23,6 +23,9 @@ const SCHEDULING_SYSTEM_LABELS: Record<string, string> = {
 const SCHEDULING_FALLBACK_RULE =
   "Fallback de agenda: se o sistema de agenda não retornar horários no momento, isso só pode ser dito depois de o paciente demonstrar intenção clara de agendar. Não explique integração, erro técnico ou indisponibilidade. Responda em 1 frase curta: \"Não consegui confirmar a agenda pelo sistema agora, mas vou verificar com a equipe e te retorno por aqui com os horários disponíveis.\" Não envie telefone nesse fallback, exceto em urgência.";
 
+const AUDIO_CONTINUITY_RULE =
+  "Regra de continuidade para áudio: valide áudio somente na resposta imediatamente após o áudio e de forma natural. Não anuncie o recebimento do áudio nem use fórmula de confirmação do canal. Use no máximo 1 frase curta de validação, responda a intenção atual e avance. Se a mensagem seguinte do paciente for texto, NUNCA mencione o áudio anterior; responda somente a nova pergunta. Não parafraseie o áudio inteiro nem repita a mesma explicação. Respostas em áudio ou sobre áudio devem ter no máximo 3 frases curtas.";
+
 function sanitizePromptContent(content: string) {
   return content
     .replace(/[—–]/g, "-")
@@ -134,9 +137,18 @@ function normalizeGeneratedModules(
       normalized.QUALIFICATION,
       "Pergunta obrigatória de SPIN básico: quando o paciente perguntar como funciona, quanto custa, ou falar de procedimento sem pedir agenda, a próxima fala deve conter 1 pergunta de objetivo, dor ou impacto antes de oferecer reserva.",
     ].filter(Boolean).join("\n"),
+    AUDIO_AND_HANDOFF: [
+      normalized.AUDIO_AND_HANDOFF,
+      AUDIO_CONTINUITY_RULE,
+      "Exemplo correto após áudio: \"Claro, Senhor Marcos. Para implantes, a avaliação mostra se há perda óssea e qual caminho é mais seguro. O Senhor usa prótese hoje ou está sem alguns dentes?\"",
+      "Exemplo correto após pergunta por texto: \"Sim, a avaliação é gratuita e sem compromisso. O orçamento do tratamento é apresentado depois da análise clínica.\"",
+      "Exemplo proibido: começar falando sobre o recebimento do áudio ou repetir que entendeu o canal em vez de responder a intenção atual.",
+    ].filter(Boolean).join("\n"),
     ABSOLUTE_RULES: [
       normalized.ABSOLUTE_RULES,
       "NUNCA use travessão longo ou médio em mensagens ao paciente.",
+      "NUNCA repita confirmação de áudio em mensagens seguintes. Se o paciente mandou texto depois do áudio, responda só ao texto atual.",
+      "NUNCA faça respostas longas para áudio; limite a 3 frases curtas e 1 pergunta de condução.",
       client.salesApproach === "DIRECT"
         ? "SEMPRE conduza com objetividade, mas faça 1 pergunta curta de contexto quando a dúvida do paciente ainda for genérica."
         : "SEMPRE faça pelo menos 1 pergunta de contexto/SPIN antes de oferecer agenda quando o paciente ainda não explicou objetivo, dor ou incômodo.",
@@ -332,6 +344,7 @@ Estado da conversa — regras obrigatórias (incluir exatamente assim no módulo
 4. Se enviar vídeo, imagem, documento ou link, escreva no máximo 1 frase curta de contexto, envie a mídia e PARE. Aguarde o paciente voltar antes de fazer nova pergunta.
 5. Perguntar origem ("Instagram, indicação, anúncio?") é permitido só quando não houver pergunta concreta pendente e nunca na mesma mensagem em que envia mídia.
 6. Pergunta fora do escopo da clínica, saúde bucal, atendimento, campanha ou agendamento deve ser recusada de forma breve. NUNCA responda a pergunta fora de escopo, mesmo que seja simples. Exemplo: se perguntarem "qual a capital da França?", NÃO diga "Paris"; responda: "Isso foge um pouco do meu campo por aqui, mas posso te ajudar com a avaliação, tratamentos ou agendamento na clínica 😊".
+7. Áudio tem memória curta: confirme o áudio somente na resposta imediatamente seguinte ao áudio. Se o paciente mandar uma pergunta por texto depois, responda a pergunta atual e não mencione o áudio anterior.
 
 Condução consultiva — regras obrigatórias (incluir exatamente assim no módulo, adaptando ao campo "Condução do atendimento"):
 ${salesApproachRules}
@@ -429,11 +442,14 @@ Exemplo 1 (agendamento completo): abertura natural → qualificação → coleta
 Exemplo 2 (urgência): paciente relata dor → assistente reconhece com empatia → fornece telefone e instrui a procurar atendimento imediato. 3 turnos.
 - Incluir SOMENTE se o campo "Atende urgência odontológica" contiver texto afirmativo (ex: "sim", "atende", "apenas dor intensa"). Se o campo indicar que a clínica NÃO atende urgências, substituir pelo cenário de recusa humanizada: reconhecer a dor, indicar SAMU/UPA e oferecer agendamento para quando melhorar.
 
-AUDIO_AND_HANDOFF — máx. 80 palavras. 3 regras de áudio COMPLETAS:
-1. Ao receber áudio, confirme o conteúdo entendido antes de responder.
-2. Se o áudio for incompreensível, peça que envie por texto.
-3. Dados coletados via áudio devem ser repetidos na confirmação final para garantir precisão.
-Sem regra extra de "solicitar confirmação de dados por texto" — isso contradiz a regra 1. Em seguida: quando e como passar para humano. Se não houver atendente configurado, escreva "Sem handoff configurado para esta clínica."
+AUDIO_AND_HANDOFF — máx. 130 palavras. Regras de áudio COMPLETAS:
+1. Ao receber áudio, valide uma única vez de forma natural e curta. NUNCA comece anunciando o recebimento do áudio ou confirmando o canal.
+2. Depois da validação curta, responda a intenção atual em até 3 frases curtas e finalize com 1 pergunta de condução quando fizer sentido.
+3. Se o áudio for incompreensível, peça que envie por texto.
+4. Dados de agendamento coletados via áudio devem ser repetidos apenas na confirmação final.
+5. Se a mensagem seguinte for texto, NUNCA mencione o áudio anterior; responda apenas a pergunta nova.
+${AUDIO_CONTINUITY_RULE}
+Em seguida: quando e como passar para humano. Se não houver atendente configurado, escreva "Sem handoff configurado para esta clínica."
 
 ABSOLUTE_RULES — 6 regras base obrigatórias + até 2 derivadas do formulário (total: 6 a 8 regras):
 
@@ -506,7 +522,7 @@ export async function restructurePromptToModules(
     "QUALIFICATION: Perguntas de qualificação por cenário (estética, prevenção, tratamento específico, paciente sem saber o que precisa → oferecer avaliação gratuita diretamente), incluindo perguntas consultivas/SPIN curtas quando o modo de condução pedir e gatilhos específicos para campanha/condição especial, implantes e consulta/avaliação, + tabela de especialistas com disponibilidade.",
     "OBJECTION_HANDLING: 3 scripts de objeção diretos sem cabeçalho descritivo: (1) medo/ansiedade, (2) falta de tempo (com horários reais e pergunta sobre período), (3) indecisão.",
     "FEW_SHOT_EXAMPLES: 2 exemplos completos no formato [PACIENTE]: / [Nome da assistente]: — (1) agendamento completo 8-10 turnos com dados fictícios reais (nome, CPF, telefone), (2) urgência com fornecimento imediato de telefone e empatia.",
-    "AUDIO_AND_HANDOFF: 3 regras de áudio (confirmar conteúdo, pedir texto se incompreensível, repetir dados na confirmação) + quando e como passar para o atendente humano (ou 'Sem handoff configurado' se não houver).",
+    "AUDIO_AND_HANDOFF: regras de áudio sem repetição robótica: validar uma vez, responder em até 3 frases curtas, não mencionar áudio anterior se a próxima mensagem for texto, pedir texto se incompreensível, repetir dados apenas na confirmação final + quando e como passar para humano.",
     "ABSOLUTE_RULES: 6 a 8 regras invioláveis (6 base obrigatórias + até 2 derivadas das restrições/frases obrigatórias do formulário), cada uma em 1 frase começando com NUNCA ou SEMPRE. Este módulo é sempre o último.",
   ].join("\n");
 
