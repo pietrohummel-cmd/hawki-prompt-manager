@@ -23,6 +23,20 @@ const SCHEDULING_SYSTEM_LABELS: Record<string, string> = {
 const SCHEDULING_FALLBACK_RULE =
   "Fallback de agenda: se o sistema de agenda não retornar horários no momento, isso só pode ser dito depois de o paciente demonstrar intenção clara de agendar. Não explique integração, erro técnico ou indisponibilidade. Responda em 1 frase curta: \"Não consegui confirmar a agenda pelo sistema agora, mas vou verificar com a equipe e te retorno por aqui com os horários disponíveis.\" Não envie telefone nesse fallback, exceto em urgência.";
 
+function sanitizePromptContent(content: string) {
+  return content
+    .replace(/[—–]/g, "-")
+    .replace(/\s+-\s+/g, ". ");
+}
+
+function minimumSpinRule(value: Client["salesApproach"] | null | undefined) {
+  if (value === "DIRECT") {
+    return "Regra mínima de condução: no modo DIRETO, a Sofia pode avançar para agenda após responder, mas se a dúvida ainda estiver genérica deve fazer 1 pergunta curta de contexto antes de pedir dados.";
+  }
+
+  return "Regra mínima de SPIN: nos modos EQUILIBRADO, CONSULTIVO/SPIN e ADAPTATIVO, toda resposta inicial sobre consulta, avaliação, preço, campanha, procedimento ou tratamento deve responder a dúvida e terminar com 1 pergunta de contexto antes de oferecer reserva de agenda. Perguntas válidas: \"O Senhor busca algo mais estético, funcional ou está com algum incômodo?\", \"O que fez o Senhor procurar isso agora?\", \"Isso tem afetado sorriso, mastigação ou confiança?\". NUNCA pule direto para \"deseja reservar?\" ou pedido de dados nessa primeira resposta, salvo se o paciente já pediu explicitamente para agendar.";
+}
+
 function getOpenAI() {
   if (!process.env.OPENAI_API_KEY) {
     throw new Error(
@@ -59,7 +73,7 @@ function salesApproachGenerationRules(value: Client["salesApproach"] | null | un
 - Depois de responder a dúvida principal, faça no máximo 1 pergunta de contexto antes de pedir agendamento.
 - Use perguntas simples sobre objetivo ou incômodo; não faça sequência longa de SPIN.
 - Se o paciente demonstrar intenção clara de agendar, avance para nome/telefone depois dessa única pergunta.
-- Respostas informativas sem envio de mídia devem terminar com 1 pergunta de contexto ou próximo passo de agenda.
+- Respostas informativas sem envio de mídia devem terminar com 1 pergunta de contexto antes de oferecer agenda.
 - Antes de pedir dados, use uma ponte humana curta conectando o que o paciente disse ao valor da avaliação.`;
   }
 
@@ -76,7 +90,7 @@ function salesApproachGenerationRules(value: Client["salesApproach"] | null | un
 - Espelhe o ritmo do paciente: se ele for direto e pedir agendamento, seja direto; se estiver curioso, inseguro ou trouxer dor, aplique SPIN leve.
 - Depois de responder a dúvida principal, faça no máximo 1 pergunta de contexto antes de avançar.
 - Nunca transforme a conversa em questionário; use situação → problema → impacto → próximo passo apenas quando isso ajudar a conduzir.
-- Respostas informativas sem envio de mídia NUNCA terminam apenas com informação; devem terminar com 1 pergunta consultiva ou próximo passo claro de agendamento.
+- Respostas informativas sem envio de mídia NUNCA terminam apenas com informação nem pulam direto para reserva; devem terminar com 1 pergunta consultiva curta antes do próximo passo de agendamento.
 - Depois que o paciente revelar objetivo/dor, não investigue mais sem necessidade: valide em 1 frase humana e avance para agenda.`;
 }
 
@@ -98,9 +112,35 @@ function normalizeGeneratedModules(
   client: Client,
   modules: Partial<Record<ModuleKey, string>>
 ): Partial<Record<ModuleKey, string>> {
+  const normalized = Object.fromEntries(
+    Object.entries(modules).map(([key, content]) => [
+      key,
+      typeof content === "string" ? sanitizePromptContent(content) : content,
+    ])
+  ) as Partial<Record<ModuleKey, string>>;
+
   return {
-    ...modules,
+    ...normalized,
     OPENING: buildSafeOpeningModule(client),
+    TONE_AND_STYLE: [
+      normalized.TONE_AND_STYLE,
+      "Regra de pontuação: NUNCA use travessão longo ou médio nas mensagens da assistente. Evite também separar ideias com hífen. Prefira ponto, vírgula ou duas frases curtas.",
+    ].filter(Boolean).join("\n"),
+    ATTENDANCE_FLOW: [
+      normalized.ATTENDANCE_FLOW,
+      minimumSpinRule(client.salesApproach),
+    ].filter(Boolean).join("\n"),
+    QUALIFICATION: [
+      normalized.QUALIFICATION,
+      "Pergunta obrigatória de SPIN básico: quando o paciente perguntar como funciona, quanto custa, ou falar de procedimento sem pedir agenda, a próxima fala deve conter 1 pergunta de objetivo, dor ou impacto antes de oferecer reserva.",
+    ].filter(Boolean).join("\n"),
+    ABSOLUTE_RULES: [
+      normalized.ABSOLUTE_RULES,
+      "NUNCA use travessão longo ou médio em mensagens ao paciente.",
+      client.salesApproach === "DIRECT"
+        ? "SEMPRE conduza com objetividade, mas faça 1 pergunta curta de contexto quando a dúvida do paciente ainda for genérica."
+        : "SEMPRE faça pelo menos 1 pergunta de contexto/SPIN antes de oferecer agenda quando o paciente ainda não explicou objetivo, dor ou incômodo.",
+    ].filter(Boolean).join("\n"),
   };
 }
 
@@ -295,9 +335,10 @@ Estado da conversa — regras obrigatórias (incluir exatamente assim no módulo
 
 Condução consultiva — regras obrigatórias (incluir exatamente assim no módulo, adaptando ao campo "Condução do atendimento"):
 ${salesApproachRules}
+${minimumSpinRule(client.salesApproach)}
 - Em todos os modos: responda primeiro à pergunta concreta do paciente; depois conduza.
 - Em todos os modos: 1 pergunta por mensagem, sem pressão e sem linguagem de venda agressiva.
-- Em todos os modos: se a mensagem respondeu sobre procedimento, campanha, valor, consulta ou diferenciais e NÃO enviou mídia, finalize com 1 pergunta de condução. Não termine apenas com uma afirmação.
+- Em todos os modos: se a mensagem respondeu sobre procedimento, campanha, valor, consulta ou diferenciais e NÃO enviou mídia, finalize com 1 pergunta de condução. Não termine apenas com uma afirmação nem pule direto para reserva de agenda quando o paciente ainda não explicou objetivo, dor ou incômodo.
 - Perguntas de condução devem investigar objetivo ou dor antes de pedir dados: "é algo estético, funcional ou incômodo?", "o que te fez buscar isso agora?", "isso tem afetado sorriso, mastigação ou confiança?".
 - Só peça nome/telefone quando o paciente já tiver intenção clara de agendar ou depois de pelo menos 1 resposta de contexto.
 - Após o paciente responder a dor/objetivo, não faça nova pergunta SPIN genérica. Use ponte humana curta: validar o ponto específico + conectar com a avaliação + pedir próximo passo.
@@ -314,7 +355,7 @@ Formatação WhatsApp — regras obrigatórias (incluir exatamente assim no mód
 - NUNCA use **texto** (duplo asterisco) — isso não é suportado pelo WhatsApp e exibe asteriscos literais na tela do paciente.
 - Se precisar destacar algo crítico (ex: telefone de urgência), use *texto* (asterisco simples = negrito nativo do WhatsApp). Para todo o resto, use texto simples sem qualquer marcação.
 - NUNCA use "#", "---", ">" ou qualquer outro símbolo de formatação Markdown. O canal é WhatsApp — texto corrido e emojis apenas.
-- NUNCA use travessão longo nas mensagens finais da assistente. Use ponto, vírgula ou divida em duas frases.
+- NUNCA use travessão longo ou médio nas mensagens finais da assistente. Use ponto, vírgula ou divida em duas frases.
 
 Regras de escuta CRÍTICAS (incluir exatamente assim no módulo):
 1. NUNCA comece uma mensagem com "Entendi que você", "Entendi que você", "Entendi que" ou qualquer variação de paráfrase literal do que o paciente disse. Reaja naturalmente, como uma pessoa responderia.
@@ -326,7 +367,7 @@ Exemplos ✅/❌ com foco na regra do "Entendi":
 ❌ "Entendi que você tem interesse em facetas. Que aspecto do sorriso você quer melhorar?"
 ✅ "Facetas são ótimas para transformar o sorriso 😊 Qual aspecto você quer melhorar?"
 
-3 comportamentos anti-robô observáveis + travessão longo PROIBIDO em qualquer mensagem da assistente.
+3 comportamentos anti-robô observáveis + travessão longo ou médio PROIBIDO em qualquer mensagem da assistente.
 Exemplos ✅/❌ adicionais no FINAL.
 
 OPENING — módulo blindado. Mensagem padrão de primeiro contato (1 linha) + variações contextuais (manhã / tarde / noite / urgência), 1 linha cada. Nada de informações institucionais.
@@ -351,7 +392,7 @@ REGRA ABSOLUTA: os horários de funcionamento presencial são mencionados SOMENT
 ATTENDANCE_FLOW — máx. 170 palavras. 5 passos numerados (1 linha cada). Este módulo NÃO deve mandar saudar nem se apresentar; saudação pertence somente ao OPENING e só na primeira mensagem.
 1. Detecção: leia a última mensagem e classifique como dúvida, pedido de agendamento, urgência, objeção ou fora de escopo. Se for fora de escopo, não responda o conteúdo; redirecione para clínica/agendamento em 1 frase.
 2. Dúvida sobre "como funciona a consulta/avaliação/planejamento": responda em até 2 frases curtas, informe que vai enviar o vídeo explicativo se houver, envie a mídia e PARE. Não pergunte origem nem qualifique no mesmo turno.
-3. Condução: em resposta informativa sem mídia (procedimento, campanha, valor, consulta), responda em 1–2 frases e termine com 1 pergunta consultiva alinhada ao modo "${salesApproachLabel(client.salesApproach)}". Nunca faça questionário.
+3. Condução: em resposta informativa sem mídia (procedimento, campanha, valor, consulta), responda em 1–2 frases e termine com 1 pergunta consultiva alinhada ao modo "${salesApproachLabel(client.salesApproach)}". Nos modos não diretos, essa pergunta vem ANTES de qualquer oferta de reserva. Nunca faça questionário.
 4. ${attendanceStep3}
 5. ${attendanceStep4} Depois confirme o resumo do agendamento com todos os dados confirmados.
 Mais 1 frase de retomada: se o contato voltar após pausa, retome pelo último ponto sem refazer saudação, apresentação ou perguntas já respondidas. NÃO descreva como qualificar — isso está em QUALIFICATION.
@@ -525,7 +566,12 @@ ${rawText}`;
   });
 
   const text = completion.choices[0]?.message.content ?? "";
-  const modules = parseModules(text);
+  const modules = Object.fromEntries(
+    Object.entries(parseModules(text)).map(([key, content]) => [
+      key,
+      typeof content === "string" ? sanitizePromptContent(content) : content,
+    ])
+  ) as Partial<Record<ModuleKey, string>>;
 
   const missing = MODULE_ORDER.filter((key) => !modules[key]);
   if (missing.length > 0) {
