@@ -194,6 +194,7 @@ function normalizeSchedulingSystem(value: string): string {
   if (v.includes("controle")) return "CONTROLE_ODONTO";
   if (v.includes("simples")) return "SIMPLES_DENTAL";
   if (v.includes("google")) return "GOOGLE_AGENDA";
+  if (v.includes("prontuario") || v.includes("prontuário") || v.includes("verde")) return "PRONTUARIO_VERDE";
   return value; // mantém texto livre se não reconheceu
 }
 

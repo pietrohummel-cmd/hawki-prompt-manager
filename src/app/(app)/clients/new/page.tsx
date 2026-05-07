@@ -25,7 +25,7 @@ const schema = z.object({
   instagram: z.string().optional(),
   website: z.string().optional(),
   attendantName: z.string().optional(),
-  schedulingSystem: z.enum(["CLINICORP", "CONTROLE_ODONTO", "SIMPLES_DENTAL", "GOOGLE_AGENDA", ""]).optional(),
+  schedulingSystem: z.enum(["CLINICORP", "CONTROLE_ODONTO", "SIMPLES_DENTAL", "GOOGLE_AGENDA", "PRONTUARIO_VERDE", ""]).optional(),
   schedulingMode: z.enum(["DIRECT", "HANDOFF", "LINK", ""]).optional(),
   tone: z.enum(["FORMAL", "INFORMAL_MODERATE", "CASUAL", ""]).optional(),
   salesApproach: z.enum(["DIRECT", "BALANCED", "CONSULTATIVE_SPIN", "ADAPTIVE", ""]).optional(),
@@ -69,6 +69,7 @@ const SCHEDULING_SYSTEM_LABELS: Record<string, string> = {
   CONTROLE_ODONTO: "Controle Odonto",
   SIMPLES_DENTAL: "Simples Dental",
   GOOGLE_AGENDA: "Google Agenda",
+  PRONTUARIO_VERDE: "Prontuário Verde",
 };
 
 const SALES_APPROACH_LABELS: Record<string, string> = {
@@ -81,7 +82,7 @@ const SALES_APPROACH_LABELS: Record<string, string> = {
 const VALID_TONES = ["FORMAL", "INFORMAL_MODERATE", "CASUAL"] as const;
 const VALID_SALES_APPROACHES = ["DIRECT", "BALANCED", "CONSULTATIVE_SPIN", "ADAPTIVE"] as const;
 const VALID_MODES = ["DIRECT", "HANDOFF", "LINK"] as const;
-const VALID_SYSTEMS = ["CLINICORP", "CONTROLE_ODONTO", "SIMPLES_DENTAL", "GOOGLE_AGENDA"] as const;
+const VALID_SYSTEMS = ["CLINICORP", "CONTROLE_ODONTO", "SIMPLES_DENTAL", "GOOGLE_AGENDA", "PRONTUARIO_VERDE"] as const;
 
 function mapParsedToForm(parsed: ParsedOnboardingData): Partial<FormData> {
   // O csv-parser já retorna os enums em maiúsculas — usar direto evita bugs de substring

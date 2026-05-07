@@ -19,6 +19,7 @@ enum SchedulingSystem {
   CONTROLE_ODONTO
   SIMPLES_DENTAL
   GOOGLE_AGENDA
+  PRONTUARIO_VERDE
 }
 
 enum SchedulingMode {

@@ -19,7 +19,7 @@ const createClientSchema = z.object({
   website: z.string().optional(),
   attendantName: z.string().optional(),
   schedulingSystem: z
-    .enum(["CLINICORP", "CONTROLE_ODONTO", "SIMPLES_DENTAL", "GOOGLE_AGENDA"])
+    .enum(["CLINICORP", "CONTROLE_ODONTO", "SIMPLES_DENTAL", "GOOGLE_AGENDA", "PRONTUARIO_VERDE"])
     .optional(),
   schedulingMode: z.enum(["DIRECT", "HANDOFF", "LINK"]).optional(),
   tone: z.enum(["FORMAL", "INFORMAL_MODERATE", "CASUAL"]).optional(),

@@ -12,6 +12,17 @@ export { MODULE_LABELS, MODULE_ORDER } from "@/lib/prompt-constants";
 // Para trocar o modelo basta alterar esta constante (ex: "gpt-4o-mini").
 const GENERATION_MODEL = "gpt-4o";
 
+const SCHEDULING_SYSTEM_LABELS: Record<string, string> = {
+  CLINICORP: "Clinicorp",
+  CONTROLE_ODONTO: "Controle Odonto",
+  SIMPLES_DENTAL: "Simples Dental",
+  GOOGLE_AGENDA: "Google Agenda",
+  PRONTUARIO_VERDE: "Prontuário Verde",
+};
+
+const SCHEDULING_FALLBACK_RULE =
+  "Fallback de agenda: se o sistema de agenda não retornar horários no momento, isso só pode ser dito depois de o paciente demonstrar intenção clara de agendar. Não explique integração, erro técnico ou indisponibilidade. Responda em 1 frase curta: \"Não consegui confirmar a agenda pelo sistema agora, mas vou verificar com a equipe e te retorno por aqui com os horários disponíveis.\" Não envie telefone nesse fallback, exceto em urgência.";
+
 function getOpenAI() {
   if (!process.env.OPENAI_API_KEY) {
     throw new Error(
@@ -69,6 +80,30 @@ function salesApproachGenerationRules(value: Client["salesApproach"] | null | un
 - Depois que o paciente revelar objetivo/dor, não investigue mais sem necessidade: valide em 1 frase humana e avance para agenda.`;
 }
 
+function buildSafeOpeningModule(client: Client): string {
+  const assistant = client.assistantName || "Sofia";
+  const clinic = client.clinicName;
+
+  return [
+    `Primeiro contato: "Bom dia! Aqui é a ${assistant}, da ${clinic}. Como posso ajudar hoje? 😊"`,
+    `Manhã: "Bom dia! Aqui é a ${assistant}, da ${clinic}. Como posso ajudar hoje? 😊"`,
+    `Tarde: "Boa tarde! Aqui é a ${assistant}, da ${clinic}. Como posso ajudar hoje? 😊"`,
+    `Noite: "Boa noite! Aqui é a ${assistant}, da ${clinic}. Como posso ajudar hoje? 😊"`,
+    `Urgência: "Sinto muito por isso. Me diga rapidamente o que aconteceu para eu te orientar da melhor forma."`,
+    "Regra: abertura tem no máximo 2 frases curtas. NUNCA mencione endereço, bairro, telefone, horários, sistema de agenda, integração, limitações técnicas ou detalhes da clínica na abertura.",
+  ].join("\n");
+}
+
+function normalizeGeneratedModules(
+  client: Client,
+  modules: Partial<Record<ModuleKey, string>>
+): Partial<Record<ModuleKey, string>> {
+  return {
+    ...modules,
+    OPENING: buildSafeOpeningModule(client),
+  };
+}
+
 export function buildClientContext(client: Client): string {
   const lines: string[] = [];
 
@@ -93,7 +128,7 @@ export function buildClientContext(client: Client): string {
 
   lines.push(`\n=== AGENDAMENTO ===`);
   if (client.businessHours) lines.push(`Horários de atendimento presencial: ${client.businessHours}`);
-  if (client.schedulingSystem) lines.push(`Sistema de agenda: ${client.schedulingSystem}`);
+  if (client.schedulingSystem) lines.push(`Sistema de agenda: ${SCHEDULING_SYSTEM_LABELS[client.schedulingSystem] ?? client.schedulingSystem}`);
   // schedulingMode traduzido para texto descritivo — evita que o gerador interprete enum bruto
   if (client.schedulingMode) {
     const schedulingModeMap: Record<string, string> = {
@@ -160,12 +195,15 @@ function buildSystemPromptForGeneration(client: Client): string {
   // Passos 3-4 do ATTENDANCE_FLOW variam conforme o modo de agendamento configurado.
   // Isso garante que o modelo gere instruções corretas para DIRECT, HANDOFF e LINK.
   const attendantRef = client.attendantName ? `"${client.attendantName}"` : "o responsável";
+  const schedulingSystemName = client.schedulingSystem
+    ? SCHEDULING_SYSTEM_LABELS[client.schedulingSystem] ?? client.schedulingSystem
+    : "sistema de agenda";
   const attendanceStep3 =
     client.schedulingMode === "HANDOFF"
       ? `Oferta de horário: NÃO ofereça horário exato. Após qualificação, informe que vai conectar com ${attendantRef}. Frase modelo: "Vou te passar agora para ${attendantRef}, que confirma o horário pra você 😊"`
-      : client.schedulingMode === "LINK"
-      ? `Oferta de horário: envie o link de agendamento (campo "Site" da clínica ou link gerado pelo ${client.schedulingSystem ?? "sistema configurado"}) e oriente o paciente a escolher o horário. Após enviar: "Conseguiu agendar? Me avisa se tiver dúvida 😊"`
-      : `Oferta de horário: confirma disponibilidade no sistema e oferece 2-3 opções de data/hora. Aguarda o paciente ESCOLHER antes de pedir qualquer dado.`;
+    : client.schedulingMode === "LINK"
+      ? `Oferta de horário: envie o link de agendamento (campo "Site" da clínica ou link gerado pelo ${client.schedulingSystem ? SCHEDULING_SYSTEM_LABELS[client.schedulingSystem] ?? client.schedulingSystem : "sistema configurado"}) e oriente o paciente a escolher o horário. Após enviar: "Conseguiu agendar? Me avisa se tiver dúvida 😊"`
+      : `Oferta de horário: após qualificar e o paciente aceitar agendar, confirme disponibilidade no ${schedulingSystemName} e ofereça 2-3 opções de data/hora. Se não conseguir consultar horários naquele momento, use o fallback de agenda em 1 frase curta e pare. Aguarde o paciente ESCOLHER antes de pedir qualquer dado.`;
 
   const attendanceStep4 =
     client.schedulingMode === "HANDOFF"
@@ -190,6 +228,10 @@ INSTRUÇÕES DE GERAÇÃO:
 - Cada módulo deve ser autocontido e claro
 - Use o pronome "${client.treatmentPronoun ?? "você"}" para se dirigir ao paciente
 - Siga a checklist de qualidade acima — não use antipadrões
+- Se houver sistema de agenda configurado, mencione o nome do sistema no módulo IDENTITY ou ATTENDANCE_FLOW e gere instruções compatíveis com ele.
+- Se houver sistema de agenda configurado, assuma que ele está disponível. NUNCA escreva que a integração não está configurada, indisponível ou que não consegue consultar horários automaticamente, a menos que isso esteja explicitamente escrito nas restrições do cliente.
+- Limitações de sistema/agendamento não são assunto do paciente no início da conversa. NUNCA mencione falha de sistema, integração, indisponibilidade, telefone ou alternativa humana na abertura, na qualificação ou em resposta inicial sobre consulta/valor/procedimento.
+- ${SCHEDULING_FALLBACK_RULE}
 
 RESTRIÇÕES DE PERFORMANCE (CRÍTICO — plataforma Hawki/GPT-4o Mini):
 
@@ -201,6 +243,7 @@ TAMANHO TOTAL:
 INSTRUÇÕES ESPECÍFICAS POR MÓDULO (seguir à risca):
 
 IDENTITY — máx. 80 palavras. APENAS: nome da assistente, nome da clínica, localização, função, escopo e sistema de agendamento (se houver). PROIBIDO incluir: lista de especialistas, diferenciais, horários, contatos. Essas informações pertencem a outros módulos.
+${client.schedulingSystem ? `Sistema de agenda configurado: ${SCHEDULING_SYSTEM_LABELS[client.schedulingSystem] ?? client.schedulingSystem}. O prompt final deve preservar esse nome.` : ""}
 LOCALIZAÇÃO no IDENTITY: use os campos disponíveis na seguinte ordem de prioridade:
 - Se tiver Rua + Bairro + Cidade: "localizada na [Rua], bairro [Bairro], [Cidade]"
 - Se tiver Bairro + Cidade: "localizada no bairro [Bairro], [Cidade]" — NUNCA omitir a palavra "bairro"
@@ -286,10 +329,15 @@ Exemplos ✅/❌ com foco na regra do "Entendi":
 3 comportamentos anti-robô observáveis + travessão longo PROIBIDO em qualquer mensagem da assistente.
 Exemplos ✅/❌ adicionais no FINAL.
 
-OPENING — máx. 80 palavras. Mensagem padrão de primeiro contato (1 linha) + variações contextuais (manhã / tarde / noite / urgência), 1 linha cada. Nada de informações institucionais.
+OPENING — módulo blindado. Mensagem padrão de primeiro contato (1 linha) + variações contextuais (manhã / tarde / noite / urgência), 1 linha cada. Nada de informações institucionais.
+REGRA CRÍTICA: abertura é saudação curta, não apresentação institucional. NUNCA incluir endereço, bairro, telefone, horários, sistema de agenda, status de integração, limitações técnicas, diferenciais ou explicação da clínica. Se gerar qualquer uma dessas informações na abertura, o módulo está errado.
+Formato obrigatório de abertura: saudação + "Aqui é a [Nome], da [Clínica]. Como posso ajudar hoje? 😊". No máximo 2 frases curtas.
 A abertura padrão deve soar natural e variada — NUNCA seguir o padrão robótico "Olá! Sou [Nome], assistente virtual da [Clínica]. Como posso ajudar?" Isso soa automatizado. Prefira aberturas curtas, acolhedoras e diretas ao ponto, como um atendente real de WhatsApp faria:
 ✅ "Oi! Tudo bem? Como posso te ajudar hoje? 😊"
 ✅ "Oi! Aqui é a [Nome], da [Clínica]. Me conta, como posso ajudar?"
+❌ "Bom dia! Sou Sofia, da Riva Odontologia, localizada na Rua..."
+❌ "No momento nossa integração com [sistema] não está configurada..."
+❌ "Para agendamentos, ligue para [telefone]..."
 ❌ "Olá! Sou a [Nome], assistente virtual da [Clínica]. Estou aqui para auxiliá-lo. Como posso ser útil?"
 
 REGRA CRÍTICA para a variação NOITE: a assistente é uma IA que atende 24h — NUNCA escrever "retorno amanhã", "já encerramos", "sua mensagem ficou registrada, retorno em breve" ou qualquer promessa de retorno futuro. A assistente está disponível AGORA.
@@ -309,6 +357,7 @@ ATTENDANCE_FLOW — máx. 170 palavras. 5 passos numerados (1 linha cada). Este 
 Mais 1 frase de retomada: se o contato voltar após pausa, retome pelo último ponto sem refazer saudação, apresentação ou perguntas já respondidas. NÃO descreva como qualificar — isso está em QUALIFICATION.
 Regra de horários: os horários de funcionamento presencial são mencionados SOMENTE quando o paciente perguntar explicitamente ("estão abertos?", "posso ir agora?", "qual o horário?"). Em todos os outros casos — incluindo saudações noturnas — responder normalmente sem mencionar horários.
 Regra de origem: perguntar "como chegou até a clínica?" somente após resolver a pergunta concreta do paciente e se não tiver acabado de enviar vídeo/link/documento.
+${SCHEDULING_FALLBACK_RULE}
 
 QUALIFICATION — máx. 280 palavras. Para cada cenário, comece com o gatilho de detecção ("Se o paciente mencionar [X]:") seguido de 1–2 perguntas diretas. Cenários obrigatórios: (1) estética, (2) prevenção/rotina, (3) tratamento específico, (4) paciente sem saber o que precisa / veio por anúncio → não perguntar nada, oferecer diretamente a avaliação gratuita. Inclua perguntas consultivas curtas compatíveis com o modo de condução: situação ("o que te fez buscar agora?"), problema ("é estético, funcional ou incômodo?"), impacto ("isso tem afetado sorriso, mastigação ou confiança?") e próximo passo ("posso reservar sua avaliação?"). Gatilhos obrigatórios: campanha/condição especial → perguntar objetivo da avaliação; procedimento específico, como implante → perguntar se é perda de dente, prótese incomodando ou avaliação de possibilidade; consulta/avaliação → se não acabou de enviar mídia, perguntar o que motivou a busca agora. Quando o paciente responder o objetivo (ex: "cor", "mais branco", "estética"), valide de forma humana e avance para agenda, sem nova investigação genérica. Use só 1 pergunta por turno. A urgência NÃO é cenário de qualificação — ela já está no passo 1 do ATTENDANCE_FLOW.
 
@@ -525,7 +574,7 @@ export async function generateClientPrompt(client: Client): Promise<{
   });
 
   const text = completion.choices[0]?.message.content ?? "";
-  const modules = parseModules(text);
+  const modules = normalizeGeneratedModules(client, parseModules(text));
 
   // Monta o systemPrompt completo concatenando todos os módulos
   const fullPrompt = MODULE_ORDER
