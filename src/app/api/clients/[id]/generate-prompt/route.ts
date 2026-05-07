@@ -3,6 +3,7 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { generateClientPrompt, MODULE_ORDER } from "@/lib/generate-prompt";
 import { runRegressionCase } from "@/lib/regression-runner";
+import { auditSofiaQualityContract } from "@/lib/prompt-quality-contract";
 import type { ModuleKey } from "@/generated/prisma";
 
 export async function POST(
@@ -20,6 +21,13 @@ export async function POST(
   try {
     // Gera o prompt via Anthropic (com injeção de Hawki Intelligence se disponível)
     const { systemPrompt, modules, knowledgeInjected } = await generateClientPrompt(client);
+    const qualityIssues = auditSofiaQualityContract(modules);
+    if (qualityIssues.length > 0) {
+      return NextResponse.json(
+        { error: "Prompt não passou no contrato de qualidade", qualityIssues },
+        { status: 422 }
+      );
+    }
 
     // Descobre o próximo número de versão
     const lastVersion = await prisma.promptVersion.findFirst({
@@ -86,7 +94,7 @@ export async function POST(
       regression = { total: regressionCases.length, passed, failed: regressionCases.length - passed };
     }
 
-    return NextResponse.json({ ...version, regression, knowledgeInjected });
+    return NextResponse.json({ ...version, regression, knowledgeInjected, qualityIssues });
   } catch (err) {
     console.error("[POST generate-prompt]", err);
     return NextResponse.json(

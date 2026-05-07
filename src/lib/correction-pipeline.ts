@@ -19,6 +19,7 @@ import { SOFIA_GUIDELINES_CONDENSED } from "@/lib/sofia-guidelines";
 import { logUsage } from "@/lib/usage-logger";
 import { evaluateRegressionCase } from "@/lib/regression-runner";
 import { auditAndRefinePromptCorrection } from "@/lib/module-editor";
+import { applySofiaQualityContract, auditSofiaQualityContract, buildSystemPromptFromModules } from "@/lib/prompt-quality-contract";
 
 function getAnthropic() {
   return new Anthropic({ apiKey: process.env.HAWKI_ANTHROPIC_API_KEY });
@@ -180,11 +181,13 @@ export async function runCorrectionPipeline(
     correctedModules[issue.module] = await applyCorrection(client, issue.module, current, issue.description);
   }
 
-  // 3 — Reconstruir systemPrompt
-  const systemPrompt = MODULE_ORDER
-    .filter((k) => correctedModules[k])
-    .map((k) => `###MÓDULO:${k}###\n${correctedModules[k]}`)
-    .join("\n\n");
+  // 3 — Aplicar contrato de qualidade e reconstruir systemPrompt
+  const contractedModules = applySofiaQualityContract(client, correctedModules);
+  const qualityIssues = auditSofiaQualityContract(contractedModules);
+  if (qualityIssues.length > 0) {
+    throw new Error(`Prompt não passou no contrato de qualidade: ${qualityIssues.map((i) => i.code).join(", ")}`);
+  }
+  const systemPrompt = buildSystemPromptFromModules(contractedModules);
 
   const changesSummary = `Pipeline automático — ${issues.length} problema${issues.length !== 1 ? "s" : ""} identificado${issues.length !== 1 ? "s" : ""}`;
 
@@ -215,8 +218,8 @@ export async function runCorrectionPipeline(
             changesSummary,
             modules: {
               create: MODULE_ORDER
-                .filter((k) => correctedModules[k])
-                .map((k) => ({ moduleKey: k as ModuleKey, content: correctedModules[k]! })),
+                .filter((k) => contractedModules[k])
+                .map((k) => ({ moduleKey: k as ModuleKey, content: contractedModules[k]! })),
             },
           },
           include: { modules: true },
@@ -235,7 +238,7 @@ export async function runCorrectionPipeline(
   // 6 — Criar tickets para cada issue
   for (const issue of issues) {
     const affectedModule = issue.module as ModuleKey;
-    const correctedContent = correctedModules[affectedModule];
+    const correctedContent = contractedModules[affectedModule];
     // Status SUGGESTED (não APPLIED) — a versão ainda é PENDING_REVIEW.
     // O ticket só deve transitar para APPLIED quando a versão for efetivamente ativada.
     // Marcar como APPLIED agora corromperia o audit trail se o draft for rejeitado.

@@ -15,6 +15,7 @@ import { auth } from "@clerk/nextjs/server";
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { MODULE_ORDER } from "@/lib/prompt-constants";
+import { applySofiaQualityContract, auditSofiaQualityContract, buildSystemPromptFromModules } from "@/lib/prompt-quality-contract";
 import type { ModuleKey } from "@/generated/prisma";
 
 type Params = { params: Promise<{ id: string; variantId: string }> };
@@ -52,11 +53,22 @@ export async function POST(_req: Request, { params }: Params) {
       return NextResponse.json({ error: "Variante já finalizada" }, { status: 409 });
     }
 
-    const modules = parseVariantModules(variant.variantPrompt);
-    const parsedKeys = Object.keys(modules) as ModuleKey[];
+    const client = await prisma.client.findUnique({ where: { id: clientId } });
+    if (!client) return NextResponse.json({ error: "Cliente não encontrado" }, { status: 404 });
+
+    const parsedModules = parseVariantModules(variant.variantPrompt);
+    const parsedKeys = Object.keys(parsedModules) as ModuleKey[];
     if (parsedKeys.length === 0) {
       return NextResponse.json(
         { error: "Não foi possível parsear módulos do variantPrompt — use o formato ###MÓDULO:KEY###" },
+        { status: 422 }
+      );
+    }
+    const modules = applySofiaQualityContract(client, parsedModules);
+    const qualityIssues = auditSofiaQualityContract(modules);
+    if (qualityIssues.length > 0) {
+      return NextResponse.json(
+        { error: "Prompt não passou no contrato de qualidade", qualityIssues },
         { status: 422 }
       );
     }
@@ -79,7 +91,7 @@ export async function POST(_req: Request, { params }: Params) {
         data: {
           clientId,
           version: nextVersionNumber,
-          systemPrompt: variant.variantPrompt,
+          systemPrompt: buildSystemPromptFromModules(modules),
           isActive: true,
           generatedBy: "AI",
           savedBy: userId,

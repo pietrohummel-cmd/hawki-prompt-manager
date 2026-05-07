@@ -4,6 +4,7 @@ import { MODULE_ORDER } from "@/lib/prompt-constants";
 import { logUsage } from "@/lib/usage-logger";
 import { SOFIA_GUIDELINES_CONDENSED } from "@/lib/sofia-guidelines";
 import { fetchRelevantKnowledge, fetchClientSpecificKnowledge, formatKnowledgeBlock } from "@/lib/knowledge-injector";
+import { applySofiaQualityContract, buildSystemPromptFromModules } from "@/lib/prompt-quality-contract";
 
 export { MODULE_LABELS, MODULE_ORDER } from "@/lib/prompt-constants";
 
@@ -652,13 +653,10 @@ export async function generateClientPrompt(client: Client): Promise<{
   });
 
   const text = completion.choices[0]?.message.content ?? "";
-  const modules = normalizeGeneratedModules(client, parseModules(text));
+  const modules = applySofiaQualityContract(client, normalizeGeneratedModules(client, parseModules(text)));
 
   // Monta o systemPrompt completo concatenando todos os módulos
-  const fullPrompt = MODULE_ORDER
-    .filter((key) => modules[key])
-    .map((key) => `###MÓDULO:${key}###\n${modules[key]}`)
-    .join("\n\n");
+  const fullPrompt = buildSystemPromptFromModules(modules);
 
   return { systemPrompt: fullPrompt, modules, knowledgeInjected };
 }

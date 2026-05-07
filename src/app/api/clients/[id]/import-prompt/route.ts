@@ -5,6 +5,7 @@ import { prisma } from "@/lib/prisma";
 import { MODULE_ORDER } from "@/lib/prompt-constants";
 import { restructurePromptToModules } from "@/lib/generate-prompt";
 import { runCorrectionPipeline } from "@/lib/correction-pipeline";
+import { applySofiaQualityContract, auditSofiaQualityContract, buildSystemPromptFromModules } from "@/lib/prompt-quality-contract";
 import type { ModuleKey } from "@/generated/prisma";
 
 const schema = z.object({
@@ -78,6 +79,15 @@ export async function POST(
     );
   }
 
+  modules = applySofiaQualityContract(client, modules);
+  const qualityIssues = auditSofiaQualityContract(modules);
+  if (qualityIssues.length > 0) {
+    return NextResponse.json(
+      { error: "Prompt não passou no contrato de qualidade", qualityIssues },
+      { status: 422 }
+    );
+  }
+
   // Se o operador descreveu um problema, dispara o pipeline automático de correção.
   // O pipeline cria uma versão PENDING_REVIEW com correções + tickets + regressão.
   if (problemDescription?.trim()) {
@@ -103,10 +113,7 @@ export async function POST(
   });
   const nextVersion = (lastVersion?.version ?? 0) + 1;
 
-  const fullPrompt = MODULE_ORDER
-    .filter((key) => modules[key])
-    .map((key) => `###MÓDULO:${key}###\n${modules[key]}`)
-    .join("\n\n");
+  const fullPrompt = buildSystemPromptFromModules(modules);
 
   await prisma.promptVersion.updateMany({
     where: { clientId: id, isActive: true },

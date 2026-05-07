@@ -4,6 +4,7 @@ import { z } from "zod";
 import { Prisma } from "@/generated/prisma";
 import { prisma } from "@/lib/prisma";
 import { MODULE_ORDER } from "@/lib/prompt-constants";
+import { applySofiaQualityContract, auditSofiaQualityContract, buildSystemPromptFromModules } from "@/lib/prompt-quality-contract";
 import type { ModuleKey } from "@/generated/prisma";
 
 const schema = z.object({
@@ -31,6 +32,9 @@ export async function POST(
 
   const { finalCorrection } = parsed.data;
 
+  const client = await prisma.client.findUnique({ where: { id } });
+  if (!client) return NextResponse.json({ error: "Cliente não encontrado" }, { status: 404 });
+
   const ticket = await prisma.correctionTicket.findFirst({
     where: { id: ticketId, clientId: id },
   });
@@ -57,18 +61,24 @@ export async function POST(
         return NextResponse.json({ error: "Nenhuma versão ativa encontrada" }, { status: 404 });
       }
 
-      const newModules = activeVersion.modules.map((m) => ({
-        moduleKey: m.moduleKey as ModuleKey,
-        content: m.moduleKey === ticket.affectedModule ? finalCorrection : m.content,
-      }));
-
-      const fullPrompt = MODULE_ORDER
-        .filter((key) => newModules.some((m) => m.moduleKey === key))
-        .map((key) => {
-          const m = newModules.find((m) => m.moduleKey === key)!;
-          return `###MÓDULO:${m.moduleKey}###\n${m.content}`;
-        })
-        .join("\n\n");
+      const moduleMap = Object.fromEntries(
+        activeVersion.modules.map((m) => [
+          m.moduleKey as ModuleKey,
+          m.moduleKey === ticket.affectedModule ? finalCorrection : m.content,
+        ])
+      ) as Partial<Record<ModuleKey, string>>;
+      const contractedModules = applySofiaQualityContract(client, moduleMap);
+      const qualityIssues = auditSofiaQualityContract(contractedModules);
+      if (qualityIssues.length > 0) {
+        return NextResponse.json(
+          { error: "Prompt não passou no contrato de qualidade", qualityIssues },
+          { status: 422 }
+        );
+      }
+      const newModules = MODULE_ORDER
+        .filter((key) => contractedModules[key])
+        .map((key) => ({ moduleKey: key as ModuleKey, content: contractedModules[key as ModuleKey]! }));
+      const fullPrompt = buildSystemPromptFromModules(contractedModules);
 
       const lastVersion = await prisma.promptVersion.findFirst({
         where: { clientId: id },
